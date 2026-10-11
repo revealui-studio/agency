@@ -12,6 +12,7 @@ import { formatConsultationRange } from './consultation-slots';
 import { DOMAIN_ADD_ON_LABEL } from './domain-pack';
 import {
   CONSULTATION_DELIVERABLE,
+  CONSULTATION_PRICE,
   DOMAIN_ADD_ON_LINE_ITEM,
   STAGE_B_CENTS,
   STAGE_B_PRICE,
@@ -63,6 +64,28 @@ export const CONSULTATION_CHANGE_POLICY = [
 export const CONSULTATION_CHANGE_CONTACT = `Email ${CONTACT_EMAIL} with your booking reference to cancel or reschedule. Notice is measured from receipt of your email to the scheduled start.`;
 
 export const CONSULTATION_READY_HINT = 'Pick a slot, then enter your name and email.';
+
+/** Booked length as the buyer and the calendar title say it. */
+export function consultationHourPhrase(hours: number): string {
+  const count = consultationHourCount(hours);
+  return count === 1 ? '1 hour' : `${count} hours`;
+}
+
+/** Shared by the book pay bar, the confirmation draft, the owner notice, and the calendar invite. */
+export function consultationRateLine(hours: number): string {
+  return `${consultationHourPhrase(hours)} at ${CONSULTATION_PRICE} per hour.`;
+}
+
+/** Google Calendar event title. The length is the same count Checkout charges. */
+export function consultationCalendarSummary(input: {
+  readonly mode: 'hold' | 'paid';
+  readonly hours: number;
+  readonly name: string;
+}): string {
+  const length = consultationHourPhrase(input.hours);
+  if (input.mode === 'hold') return `Hold, RevealUI Studio Consultation, ${length}`;
+  return `RevealUI Studio Consultation, ${length}, ${input.name}`;
+}
 
 export interface ConsultationReceipt {
   readonly label: string;
@@ -187,6 +210,7 @@ export function confirmationSubject(start: string, end: string): string {
 export function confirmationText(booking: {
   readonly start: string;
   readonly end: string;
+  readonly hours: number;
   readonly company: string | null;
   readonly stage_b: boolean;
   readonly meet_link: string | null;
@@ -196,6 +220,7 @@ export function confirmationText(booking: {
     'Payment received for your RevealUI Studio Consultation.',
     '',
     consultationWhenLine(booking.start, booking.end),
+    consultationRateLine(booking.hours),
     `Google Meet: ${meet}`,
   ];
   if (booking.company) lines.push(`Company: ${booking.company}`);
@@ -216,10 +241,14 @@ export function confirmationText(booking: {
 export function calendarInviteDescription(booking: {
   readonly start: string;
   readonly end: string;
+  readonly hours: number;
   readonly company: string | null;
   readonly stage_b: boolean;
 }): string {
-  const lines = [consultationWhenLine(booking.start, booking.end)];
+  const lines = [
+    consultationWhenLine(booking.start, booking.end),
+    consultationRateLine(booking.hours),
+  ];
   if (booking.company) lines.push(`Company: ${booking.company}`);
   lines.push(
     consultationStageLine(booking.stage_b),

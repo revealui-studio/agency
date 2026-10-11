@@ -196,6 +196,7 @@ describe('buyer-facing tool names', () => {
     const paid = {
       start: '2026-01-07T14:00:00.000Z',
       end: '2026-01-07T15:00:00.000Z',
+      hours: 1,
       company: null,
       stage_b: true,
       meet_link: 'https://meet.google.com/lookup/buyer-copy',

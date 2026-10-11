@@ -468,7 +468,12 @@ describe('consultation http', () => {
       request(`/api/consultation/booking?booking=${saved.booking_id}&session_id=cs_test_1`),
       deps,
     );
-    expect(await confirmed.json()).toEqual({ status: 'confirmed', ...SLOT, stage_b: false });
+    expect(await confirmed.json()).toEqual({
+      status: 'confirmed',
+      ...SLOT,
+      hours: 1,
+      stage_b: false,
+    });
     const wrongReference = await handleConsultationRequest(
       request(`/api/consultation/booking?booking=${saved.booking_id}&session_id=cs_wrong`),
       deps,
@@ -490,6 +495,7 @@ describe('consultation http', () => {
     );
     expect(emails[0]?.text).toContain('Payment received');
     expect(emails[0]?.text).toContain('When: Wed, Jan 7 · 9:00 AM–10:00 AM ET');
+    expect(emails[0]?.text).toContain('1 hour at $300 per hour.');
     expect(emails[0]?.text).toContain('Company: Example Co');
     expect(emails[0]?.text).not.toContain('sheet writer');
     expect(emails[0]?.text).toContain('Google Meet:');
@@ -501,6 +507,7 @@ describe('consultation http', () => {
     expect(owners[0]?.text).toContain('Buyer: Ada Buyer');
     expect(owners[0]?.text).toContain('Email: ada@example.com');
     expect(owners[0]?.text).toContain('When: Wed, Jan 7 · 9:00 AM–10:00 AM ET');
+    expect(owners[0]?.text).toContain('1 hour at $300 per hour.');
     expect(owners[0]?.text).toContain('Amount: $300');
     expect(owners[0]?.text).toContain(`Google Meet: ${paid?.meet_link}`);
     expect(owners[0]?.text).toContain(`Booking: ${saved.booking_id}`);
@@ -518,6 +525,7 @@ describe('consultation http', () => {
       status: 'confirmed',
       start: SLOT.start,
       end: SLOT.end,
+      hours: 1,
       stage_b: false,
     });
     const hidden = JSON.stringify(visible);

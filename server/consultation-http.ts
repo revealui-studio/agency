@@ -341,6 +341,7 @@ async function bookingView(request: Request, calendar: CalendarPort): Promise<Re
     status: 'confirmed',
     start: booking.start,
     end: booking.end,
+    hours: booking.hours,
     stage_b: booking.stage_b,
   });
 }

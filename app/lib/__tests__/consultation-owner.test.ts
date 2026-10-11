@@ -60,6 +60,7 @@ describe('consultation mail copy', () => {
     expect(`${subject}\n${text}`).not.toContain('\u2014');
     const notice = buildOwnerPaidNotice(booking, null);
     expect(notice.subject).toContain('RevealUI Studio');
+    expect(notice.text).toContain('1 hour at $300 per hour.');
     expect(notice.text).toContain(`Google Meet: ${CONSULTATION_MEET_FALLBACK}`);
     expect(notice.text).toContain('Domain add-on: no');
     expect(notice.text).not.toContain('Stage B:');

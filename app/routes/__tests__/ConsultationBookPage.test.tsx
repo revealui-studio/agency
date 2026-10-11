@@ -101,6 +101,10 @@ describe('ConsultationBookPage', () => {
     expect(stageB).not.toBeChecked();
     expect(screen.getByText(STAGE_B_HELPER)).toBeInTheDocument();
     expect(screen.getByText(CONSULTATION_AFTER_PAY)).toBeInTheDocument();
+    expect(screen.getByText('1 hour at $300 per hour.')).toBeInTheDocument();
+    expect(
+      await screen.findByRole('radiogroup', { name: 'Open slots for 1 hour' }),
+    ).toBeInTheDocument();
     expect(view.container.textContent ?? '').not.toContain('Add the domain pack');
     expect(view.container.textContent ?? '').not.toMatch(/\bStage B\b/);
     expect((view.container.textContent ?? '').replaceAll('Google Meet', '')).not.toMatch(
@@ -317,7 +321,8 @@ describe('ConsultationBookPage', () => {
           JSON.stringify({
             status: 'confirmed',
             start: '2026-01-07T14:00:00.000Z',
-            end: '2026-01-07T15:00:00.000Z',
+            end: '2026-01-07T16:00:00.000Z',
+            hours: 2,
             stage_b: false,
           }),
         ),
@@ -326,6 +331,7 @@ describe('ConsultationBookPage', () => {
     render(<ConsultationBookSuccessPage />);
     expect(await screen.findByRole('heading', { name: 'Consultation booked' })).toBeInTheDocument();
     expect(screen.getByText(CONSULTATION_SUCCESS)).toBeInTheDocument();
+    expect(screen.getByText('2 hours at $300 per hour.')).toBeInTheDocument();
     expect(screen.getByText(CONSULTATION_DELIVERABLE)).toBeInTheDocument();
     expect(window.location.search).not.toContain('cs_test_1');
     window.history.pushState({}, '', '/');
@@ -358,14 +364,18 @@ describe('ConsultationBookPage', () => {
   });
 
   it('keeps the pay control and fields full width for a narrow viewport', async () => {
-    vi.stubGlobal('fetch', () =>
-      Promise.resolve(
+    window.history.pushState({}, '', '/consultation/book');
+    const availability: string[] = [];
+    vi.stubGlobal('fetch', (input: RequestInfo | URL) => {
+      const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
+      if (url.includes('/api/consultation/availability')) availability.push(url);
+      return Promise.resolve(
         new Response(JSON.stringify({ timezone: 'America/New_York', hours: 1, slots: [] }), {
           status: 200,
           headers: { 'content-type': 'application/json' },
         }),
-      ),
-    );
+      );
+    });
     render(<ConsultationBookPage />);
     const pay = await screen.findByRole('button', { name: 'Continue to payment' });
     expect(pay.className).toContain('w-full');
@@ -383,7 +393,9 @@ describe('ConsultationBookPage', () => {
     expect(stageB).not.toBeChecked();
     fireEvent.click(stageB);
     expect(stageB).toBeChecked();
+    expect(screen.getByText('1 hour at $300 per hour.')).toBeInTheDocument();
     expect(screen.getByText('Due today $597.')).toBeInTheDocument();
+    expect(window.location.search).toBe('?hours=1');
     expect(
       await screen.findByText('No open slots for 1 hour in the next 3 weeks.'),
     ).toBeInTheDocument();
@@ -391,6 +403,12 @@ describe('ConsultationBookPage', () => {
     expect(
       await screen.findByText('No open slots for 2 hours in the next 3 weeks.'),
     ).toBeInTheDocument();
+    expect(screen.getByText('2 hours at $300 per hour.')).toBeInTheDocument();
+    expect(screen.getByText('Due today $897.')).toBeInTheDocument();
+    await waitFor(() => {
+      expect(window.location.search).toBe('?hours=2');
+      expect(availability.some((url) => url.includes('hours=2'))).toBe(true);
+    });
   });
 
   it('shows the unconfigured calendar state when booking is not set up', async () => {

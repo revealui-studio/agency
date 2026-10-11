@@ -7,7 +7,11 @@
  */
 
 import type { Booking } from './consultation-booking';
-import { consultationBookDueCents, consultationWhenLine } from './consultation-buyer';
+import {
+  consultationBookDueCents,
+  consultationRateLine,
+  consultationWhenLine,
+} from './consultation-buyer';
 import { DOMAIN_ADD_ON_LABEL } from './domain-pack';
 import { formatUsdFromCents } from './money';
 import { CONTACT_EMAIL } from './site';
@@ -67,6 +71,7 @@ export function buildOwnerPaidNotice(
     `Buyer: ${oneLine(booking.name)}`,
     `Email: ${oneLine(booking.email)}`,
     `When: ${when}`,
+    consultationRateLine(booking.hours),
     `Amount: ${formatUsdFromCents(amountCents)}`,
     `Google Meet: ${meetLink}`,
     `Booking: ${oneLine(booking.booking_id)}`,

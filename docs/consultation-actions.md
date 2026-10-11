@@ -29,7 +29,7 @@ notice. Signed refund events retrieve current Stripe charge, succeeded refunds, 
 payment-intent evidence before reconciling private delivery; they never execute
 a refund.
 
-`GET /api/consultation/booking?booking=` returns the paid time, Google Meet link, and Stage B flag for the success page. It does not return the buyer name or email.
+`GET /api/consultation/booking?booking=` returns the paid time, the booked hour count, and the Stage B flag for the success page. It does not return the buyer name or email. The hour count is the same length on the calendar event.
 
 ## Consultation deliverable and share fulfillment
 
