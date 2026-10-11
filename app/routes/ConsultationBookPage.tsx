@@ -34,6 +34,8 @@ import {
   CONSULTATION_SUCCESS,
   consultationBookDueCents,
   consultationEmptySlots,
+  consultationHourPhrase,
+  consultationRateLine,
   consultationStageLine,
   consultationWhenLine,
   NETWORK_LINK_USED,
@@ -197,6 +199,19 @@ export function ConsultationBookPage({
       });
     return () => controller.abort();
   }, [linkToken]);
+
+  useEffect(() => {
+    if (typeof window === 'undefined' || window.location.pathname !== '/consultation/book') return;
+    const url = new URL(window.location.href);
+    const next = String(hours);
+    if (url.searchParams.get('hours') === next) return;
+    url.searchParams.set('hours', next);
+    window.history.replaceState(
+      window.history.state,
+      '',
+      `${url.pathname}${url.search}${url.hash}`,
+    );
+  }, [hours]);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -371,7 +386,7 @@ export function ConsultationBookPage({
                 errorDescription: '',
                 unconfiguredTitle: 'Booking is not available on this server yet.',
                 unconfiguredDescription: '',
-                slotsLabel: 'Open slots',
+                slotsLabel: `Open slots for ${consultationHourPhrase(hours)}`,
                 noSlotsTitle: 'No open slots this day.',
                 noSlotsDescription: '',
               }}
@@ -473,8 +488,9 @@ export function ConsultationBookPage({
                   selectedSlot ? 'mt-2 text-base text-foreground' : 'text-base text-foreground'
                 }
               >
-                Due today {formatUsdFromCents(due)}.
+                {consultationRateLine(hours)}
               </p>
+              <p className="mt-1 text-base text-foreground">Due today {formatUsdFromCents(due)}.</p>
               {!ready && !submitting ? (
                 <p className="mt-2 text-sm text-muted-foreground">{CONSULTATION_READY_HINT}</p>
               ) : null}
@@ -520,7 +536,11 @@ export function ConsultationBookSuccessPage() {
   const [status, setStatus] = useState<'checking' | 'confirmed' | 'pending' | 'unavailable'>(
     'checking',
   );
-  const [detail, setDetail] = useState<{ label: string; stageB: boolean } | null>(null);
+  const [detail, setDetail] = useState<{
+    label: string;
+    stageB: boolean;
+    hours: number;
+  } | null>(null);
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     const booking = params.get('booking');
@@ -550,10 +570,17 @@ export function ConsultationBookSuccessPage() {
           typeof body.start === 'string' &&
           'end' in body &&
           typeof body.end === 'string' &&
+          'hours' in body &&
+          typeof body.hours === 'number' &&
+          Number.isInteger(body.hours) &&
           'stage_b' in body &&
           typeof body.stage_b === 'boolean'
         ) {
-          setDetail({ label: consultationWhenLine(body.start, body.end), stageB: body.stage_b });
+          setDetail({
+            label: consultationWhenLine(body.start, body.end),
+            stageB: body.stage_b,
+            hours: body.hours,
+          });
           setStatus('confirmed');
         } else if (body.status === 'pending') {
           setStatus('pending');
@@ -593,6 +620,9 @@ export function ConsultationBookSuccessPage() {
           <>
             <p className="mt-6 break-words text-base font-semibold text-foreground">
               {detail.label}
+            </p>
+            <p className="mt-2 break-words text-base text-foreground">
+              {consultationRateLine(detail.hours)}
             </p>
             <p className="mt-2 break-words text-base text-muted-foreground">
               {consultationStageLine(detail.stageB)}

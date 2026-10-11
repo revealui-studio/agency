@@ -12,9 +12,10 @@ Example range: `Wed, Jan 7 · 9:00 AM–10:00 AM ET`
 Payment received for your RevealUI Studio Consultation.
 
 When: {Eastern Time range}
+{booked hours} at $300 per hour.
 Google Meet: {meet link, or "The Google Meet link is on the calendar invite."}
 Company: {company, when present}
-The domain pack ($297) is on this payment.
+The Domain add-on ($297) is on this payment.
 OR
 This payment is the consultation only.
 Your session includes: Session notes and a recommended next step.
@@ -23,7 +24,9 @@ Prep: send the system you want to look at and the question you want answered. A 
 Questions: founder@revealui.com
 ```
 
-Do not describe the domain pack as free, included, waived, or credited. The add-on is either on the Checkout Session or absent. A network order still uses these sentences: the pack line stays "The domain pack ($297) is on this payment." Do not add a line that the fee was removed. Do not put internal desk notes in the email draft or the calendar invite. The Stripe SKU stays stage-b.
+The hour line is the same sentence as the book pay bar and the calendar invite: `1 hour at $300 per hour.` A longer booking says the selected count, from 2 hours through 8 hours. The Google Calendar title carries that same length.
+
+Do not describe the Domain add-on as free, included, waived, or credited. The add-on is either on the Checkout Session or absent. A network order still uses these sentences: the add-on line stays "The Domain add-on ($297) is on this payment." Do not add a line that the fee was removed. Do not put internal desk notes in the email draft or the calendar invite. The Stripe SKU stays stage-b.
 
 The subject contains `RevealUI Studio`. The body says Google Meet. Do not shorten that label to Meet. Do not use an em dash (U+2014). Time ranges keep the en dash from `formatConsultationRange`.
 

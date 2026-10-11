@@ -12,7 +12,10 @@ import {
   deskScheduleTransition,
   stageBFeeOf,
 } from '../app/lib/consultation-booking';
-import { calendarInviteDescription } from '../app/lib/consultation-buyer';
+import {
+  calendarInviteDescription,
+  consultationCalendarSummary,
+} from '../app/lib/consultation-buyer';
 import type { TimeInterval } from '../app/lib/consultation-slots';
 import { providerFetch } from './provider-http';
 
@@ -420,10 +423,11 @@ function propsOf(booking: Booking): Record<string, string> {
 
 function eventBody(booking: Booking, mode: 'hold' | 'paid'): Record<string, unknown> {
   const body: Record<string, unknown> = {
-    summary:
-      mode === 'hold'
-        ? 'Hold, RevealUI Studio Consultation'
-        : `RevealUI Studio Consultation, ${booking.name}`,
+    summary: consultationCalendarSummary({
+      mode,
+      hours: booking.hours,
+      name: booking.name,
+    }),
     start: { dateTime: booking.start, timeZone: 'America/New_York' },
     end: { dateTime: booking.end, timeZone: 'America/New_York' },
     transparency: 'opaque',
