@@ -13,6 +13,7 @@ import {
   bookingIdFromCheckoutUrl,
   calendarInviteDescription,
   consultationBookDueCents,
+  consultationCalendarSummary,
   readConsultationReceipt,
   rememberConsultationReceipt,
 } from '@/lib/consultation-buyer';
@@ -280,6 +281,7 @@ describe('buildConfirmationEmail', () => {
     expect(email.subject).not.toContain('\u2014');
     expect(email.text).toContain('Payment received');
     expect(email.text).toContain('When: Wed, Jan 7 · 9:00 AM–10:00 AM ET');
+    expect(email.text).toContain('1 hour at $300 per hour.');
     expect(email.text).toContain('Google Meet: https://meet.google.com/lookup/book_1');
     expect(email.text).not.toMatch(/(^|\n)Meet:/);
     expect(email.text).not.toContain('The Meet link');
@@ -295,13 +297,21 @@ describe('buildConfirmationEmail', () => {
     const invite = calendarInviteDescription({
       start,
       end,
+      hours: 1,
       company: 'Example Co',
       stage_b: true,
     });
     expect(invite).toContain('When: Wed, Jan 7 · 9:00 AM–10:00 AM ET');
-    expect(invite).toContain('The domain pack ($297) is on this payment.');
+    expect(invite).toContain('1 hour at $300 per hour.');
+    expect(consultationCalendarSummary({ mode: 'hold', hours: 2, name: 'Ada Buyer' })).toBe(
+      'Hold, RevealUI Studio Consultation, 2 hours',
+    );
+    expect(consultationCalendarSummary({ mode: 'paid', hours: 2, name: 'Ada Buyer' })).toBe(
+      'RevealUI Studio Consultation, 2 hours, Ada Buyer',
+    );
+    expect(invite).toContain('The Domain add-on ($297) is on this payment.');
     expect(invite).not.toMatch(/sheet writer/i);
-    expect(invite).not.toMatch(/domain pack.*(?:included|waived|free)/i);
+    expect(invite).not.toMatch(/\bdomain pack\b/i);
     expect(invite).toContain('full refund of Consultation time or a free reschedule');
   });
 
