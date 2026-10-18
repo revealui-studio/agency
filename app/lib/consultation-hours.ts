@@ -1,6 +1,6 @@
 import { formatUsdFromCents } from './money';
 
-/** One Consultation is $300. The dropdown multiplies that unit. It is not a separate SKU. */
+/** Consultation is $300 per hour. The dropdown multiplies hours from 1 to 8. It is not a separate SKU. */
 export const CONSULTATION_UNIT_CENTS = 30_000 as const;
 
 export const CONSULTATION_HOUR_MIN = 1 as const;
