@@ -49,7 +49,10 @@ import {
   type ConsultationThrottle,
   createConsultationThrottle,
 } from './consultation-rate-limit.ts';
-import { createSharedConsultationThrottle } from './consultation-shared-throttle.ts';
+import {
+  consultationFirewallHost,
+  createSharedConsultationThrottle,
+} from './consultation-shared-throttle.ts';
 import {
   refundedCheckoutFromStripe,
   type StripePort,
@@ -582,11 +585,11 @@ async function assessBookingChange(
   });
 }
 
-function throttleFor(deps: ConsultationDeps): ConsultationThrottle {
+function throttleFor(deps: ConsultationDeps, env: ConsultationEnv): ConsultationThrottle {
   if (deps.throttle) return deps.throttle;
   processThrottle ??=
     process.env.VERCEL || process.env.NODE_ENV === 'production'
-      ? createSharedConsultationThrottle()
+      ? createSharedConsultationThrottle(consultationFirewallHost(env.publicSiteUrl))
       : createConsultationThrottle();
   return processThrottle;
 }
@@ -619,11 +622,11 @@ export async function handleConsultationRequest(
     return json(405, { error: 'method' });
 
   const now = (deps.now ?? (() => new Date()))();
-  const throttle = throttleFor(deps);
+  const env = deps.env ?? consultationEnvFromProcess();
+  const throttle = throttleFor(deps, env);
   const limited = await throttle.consume(request, path, now.getTime());
   if (limited) return limited;
 
-  const env = deps.env ?? consultationEnvFromProcess();
   const fetchImpl = deps.fetchImpl ?? fetch;
   // The address throttle already ran. The jti ledger is touched only after that.
   const networkLedger =

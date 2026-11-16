@@ -1,6 +1,9 @@
 /** @vitest-environment node */
 import { describe, expect, it } from 'vitest';
-import { createSharedConsultationThrottle } from '../consultation-shared-throttle';
+import {
+  consultationFirewallHost,
+  createSharedConsultationThrottle,
+} from '../consultation-shared-throttle';
 
 const request = new Request('https://example.com/api/consultation/book', {
   headers: { 'x-real-ip': '192.0.2.1' },
@@ -8,6 +11,26 @@ const request = new Request('https://example.com/api/consultation/book', {
 const path = '/api/consultation/book';
 
 describe('shared consultation quotas', () => {
+  it('uses the configured public production origin while preserving preview isolation', () => {
+    expect(
+      consultationFirewallHost('https://revealuistudio.com/', 'production', 'protected.vercel.app'),
+    ).toBe('revealuistudio.com');
+    expect(
+      consultationFirewallHost('https://revealuistudio.com/', 'preview', 'preview.vercel.app'),
+    ).toBe('preview.vercel.app');
+    for (const origin of [
+      undefined,
+      'http://example.com',
+      'https://user:secret@example.com',
+      'https://example.com/path',
+      'https://example.com/?secret=value',
+    ]) {
+      expect(
+        consultationFirewallHost(origin, 'production', 'protected.vercel.app'),
+      ).toBeUndefined();
+    }
+  });
+
   it('shares enforcement between instances and across a cold start', async () => {
     let count = 0;
     const provider = async () => ({ rateLimited: ++count > 2 });

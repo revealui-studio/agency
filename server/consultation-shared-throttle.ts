@@ -12,8 +12,34 @@ export const CONSULTATION_QUOTAS = {
   '/api/consultation/booking': { id: 'agency-consultation-booking', limit: 30 },
 } as const;
 
+/** Generated production deployment URLs can require SSO; the configured public origin does not. */
+export function consultationFirewallHost(
+  publicOrigin: string | undefined,
+  environment: string | undefined = process.env.VERCEL_ENV,
+  deploymentHost: string | undefined = process.env.VERCEL_URL,
+): string | undefined {
+  if (environment !== 'production') return deploymentHost;
+  if (!publicOrigin) return undefined;
+  try {
+    const url = new URL(publicOrigin);
+    if (
+      url.protocol !== 'https:' ||
+      url.username ||
+      url.password ||
+      url.port ||
+      url.pathname !== '/' ||
+      url.search ||
+      url.hash
+    )
+      return undefined;
+    return url.host;
+  } catch {
+    return undefined;
+  }
+}
+
 export function createSharedConsultationThrottle(
-  host: string | undefined = process.env.VERCEL_URL,
+  host: string | undefined,
   check: typeof checkRateLimit = checkRateLimit,
 ): ConsultationThrottle {
   const cache = createConsultationThrottle();
