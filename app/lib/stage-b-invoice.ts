@@ -1,6 +1,6 @@
-import { DOMAIN_PACK_CREDIT_LABEL } from './domain-pack';
-import { DOMAIN_ADD_ON_LINE_ITEM, STAGE_B_CENTS } from './engagements';
-import { formatUsdFromCents } from './money';
+import { DOMAIN_PACK_CREDIT_LABEL } from './domain-pack.ts';
+import { DOMAIN_ADD_ON_LINE_ITEM, STAGE_B_CENTS } from './engagements.ts';
+import { formatUsdFromCents } from './money.ts';
 
 /**
  * Server invoice for the domain add-on.

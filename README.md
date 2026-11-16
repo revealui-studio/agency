@@ -14,7 +14,7 @@ This is the customer-facing site for the **agency arm** of RevealUI Studio (serv
 
 ## Stack
 
-The same stack the platform itself runs on — this site is a real external consumer of the published `@revealui/*` packages, which doubles as a smoke test for the npm distribution.
+The same stack the platform itself runs on — this site consumes published contracts and router packages. Presentation is pinned to the checked-in `vendor/revealui-presentation-0.15.0.tgz`; CI validates that artifact alongside the npm dependencies.
 
 - Vite + React 19 (TypeScript strict)
 - Tailwind CSS v4 via `@tailwindcss/vite`
@@ -87,4 +87,4 @@ Strategy and design decisions are coordinated internally; see the founder for co
 
 The agency site lives in its own repo so deploys are decoupled from the
 main RevealUI monorepo CI and so the site doubles as a real external
-consumer of the published `@revealui/*` npm packages.
+consumer of published contracts/router packages and a pinned presentation artifact.

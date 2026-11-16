@@ -18,7 +18,7 @@
  */
 
 import { LAUNCH_PACKAGE_PRICE } from '@revealui/contracts/pricing';
-import { DOMAIN_ADD_ON_LABEL } from './domain-pack';
+import { DOMAIN_ADD_ON_LABEL } from './domain-pack.ts';
 
 /**
  * Monorepo counts for public proof points. Source: MARKETING_METRICS.md §1

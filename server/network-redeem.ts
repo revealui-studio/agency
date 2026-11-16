@@ -25,8 +25,8 @@
  * 7. The claim expires with the token TTL.
  */
 
-import { type ConsultationEnv, googleAccessToken } from './consultation-calendar';
-import { providerFetch } from './provider-http';
+import { type ConsultationEnv, googleAccessToken } from './consultation-calendar.ts';
+import { providerFetch } from './provider-http.ts';
 
 const CALENDAR_SCOPE = 'https://www.googleapis.com/auth/calendar';
 const KIND = 'studio-network-redeem';

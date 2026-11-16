@@ -1,8 +1,16 @@
 import { SpeedInsights } from '@vercel/speed-insights/react';
-import { useLayoutEffect, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { SentryTracker } from '@/components/SentryTracker';
 import { UmamiTracker } from '@/components/UmamiTracker';
-import { type AgencyConsent, DENIED, readConsent, writeConsent } from '@/lib/cookie-consent';
+import {
+  type AgencyConsent,
+  CONSENT_CHANGED,
+  CONSENT_PREFERENCES,
+  DENIED,
+  readConsent,
+  writeConsent,
+} from '@/lib/cookie-consent';
+import { beforeSpeedSend } from '@/lib/telemetry-privacy';
 
 /** Bottom offset for other fixed bars, such as the Consultation pay dock. */
 export const COOKIE_BANNER_HEIGHT_VAR = '--cookie-banner-height';
@@ -12,6 +20,28 @@ export function CookieConsent() {
   const [decided, setDecided] = useState(initial.decided);
   const [consent, setConsent] = useState<AgencyConsent>(initial.consent);
   const bannerRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const refresh = () => {
+      const next = readConsent();
+      setConsent(next.consent);
+      setDecided(next.decided);
+    };
+    const preferences = () => setDecided(false);
+    const storage = (event: StorageEvent) => {
+      if (event.key === CONSENT_CHANGED || event.key === null) refresh();
+    };
+    window.addEventListener(CONSENT_CHANGED, refresh);
+    window.addEventListener(CONSENT_PREFERENCES, preferences);
+    window.addEventListener('storage', storage);
+    window.addEventListener('focus', refresh);
+    return () => {
+      window.removeEventListener(CONSENT_CHANGED, refresh);
+      window.removeEventListener(CONSENT_PREFERENCES, preferences);
+      window.removeEventListener('storage', storage);
+      window.removeEventListener('focus', refresh);
+    };
+  }, []);
 
   useLayoutEffect(() => {
     if (decided) {
@@ -45,7 +75,7 @@ export function CookieConsent() {
 
   function choose(next: AgencyConsent): void {
     writeConsent(next);
-    setConsent(next);
+    setConsent(readConsent().consent);
     setDecided(true);
   }
 
@@ -53,7 +83,7 @@ export function CookieConsent() {
     <>
       {decided && consent.analytics ? (
         <>
-          <SpeedInsights />
+          <SpeedInsights beforeSend={beforeSpeedSend} />
           <UmamiTracker />
           <SentryTracker />
         </>

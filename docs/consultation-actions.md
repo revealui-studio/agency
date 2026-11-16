@@ -8,7 +8,7 @@ Order is load-bearing. `save_slot` runs before `create_checkout_session`. Checko
 
 | Action | Gate | Preconditions | Side effects |
 | --- | --- | --- | --- |
-| `save_slot` | none | Slot is inside generated weekday availability. Body `waive` and `stage_b_fee` are ignored before this action. | Calendar hold, status `slot_held`, 20 minutes. |
+| `save_slot` | none | Slot is inside generated weekday availability. Body `waive` and `stage_b_fee` are ignored before this action. | Calendar hold, status `slot_held`, 40 minutes. |
 | `create_checkout_session` | none | Prior hold exists, status is `slot_held`, and it has not expired. | Stripe Checkout Session. Lines from `consultationCheckoutLines` only. |
 | `write_calendar_meet_on_pay` | none | `payment_status` is `paid`. A second call returns `already_scheduled`. | Calendar event plus Google Meet. Desk transition stays `no-desk-writer`. |
 | `notify_owner_paid` | none | Booking status is `paid_scheduled`. A second delivery does not send again. | Email to founder@revealui.com with buyer name, buyer email, Eastern Time, amount, Google Meet link, booking id, Stage B, and network. Does not mail the buyer. Desk writer stays a stub. |
@@ -202,3 +202,5 @@ The booking registry itself requires no new secrets. Private fulfillment adds
 the supported content API origin and existing operator device credential to the
 server configuration; missing configuration fails closed. Merge with a merge
 commit. Do not squash.
+
+Booking expiry, provider reconciliation, delivery retries and telemetry controls are specified in [booking reliability](booking-reliability.md). A wall-clock expiry alone does not release a Checkout-backed reservation.

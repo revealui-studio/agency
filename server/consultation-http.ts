@@ -10,16 +10,16 @@ import {
   consultationActions,
   runConsultationBook,
   runPaidConsultation,
-} from '../app/lib/consultation-actions';
-import type { ConsultationChangeRequest } from '../app/lib/consultation-booking';
+} from '../app/lib/consultation-actions.ts';
+import type { ConsultationChangeRequest } from '../app/lib/consultation-booking.ts';
 import {
   type Booking,
   bookInputFromNetwork,
   type ConfirmationEmail,
   parseBookBody,
-} from '../app/lib/consultation-booking';
-import { NETWORK_LINK_USED } from '../app/lib/consultation-buyer';
-import { consultationDueCents } from '../app/lib/consultation-hours';
+} from '../app/lib/consultation-booking.ts';
+import { NETWORK_LINK_USED } from '../app/lib/consultation-buyer.ts';
+import { consultationDueCents } from '../app/lib/consultation-hours.ts';
 import {
   mintNetworkToken,
   NetworkWaiveUnconfigured,
@@ -28,35 +28,41 @@ import {
   networkEmailMatches,
   parseNetworkLinkBody,
   verifyNetworkToken,
-} from '../app/lib/consultation-network-waive';
-import type { OwnerPaidNotice } from '../app/lib/consultation-owner';
+} from '../app/lib/consultation-network-waive.ts';
+import type { OwnerPaidNotice } from '../app/lib/consultation-owner.ts';
 import {
   CONSULTATION_TZ,
   generateConsultationSlots,
   zonedWallToUtc,
-} from '../app/lib/consultation-slots';
+} from '../app/lib/consultation-slots.ts';
 import {
   type CalendarPort,
   type ConsultationEnv,
   calendarConfigured,
   calendarFromEnv,
   consultationEnvFromProcess,
-} from './consultation-calendar';
-import { applyVerifiedRefund } from './consultation-fulfillment';
-import { deliverOwnerPaidNotice } from './consultation-owner-mail';
-import { type ConsultationThrottle, createConsultationThrottle } from './consultation-rate-limit';
+} from './consultation-calendar.ts';
+import { applyVerifiedRefund } from './consultation-fulfillment.ts';
+import { refundUnavailableReservation } from './consultation-lifecycle.ts';
+import { deliverOwnerPaidNotice } from './consultation-owner-mail.ts';
+import {
+  type ConsultationThrottle,
+  createConsultationThrottle,
+} from './consultation-rate-limit.ts';
+import { createSharedConsultationThrottle } from './consultation-shared-throttle.ts';
 import {
   refundedCheckoutFromStripe,
   type StripePort,
   stripeFromEnv,
   verifyStripeSignature,
-} from './consultation-stripe';
+} from './consultation-stripe.ts';
 import {
   createGoogleNetworkLedger,
   createMemoryNetworkLedger,
   type NetworkRedeemLedger,
-} from './network-redeem';
-import { verifySession } from './session';
+  networkRedeemEventId,
+} from './network-redeem.ts';
+import { verifySession } from './session.ts';
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
@@ -69,8 +75,8 @@ export interface ConsultationDeps {
   readonly bookingId?: () => string;
   readonly onConfirmation?: (email: ConfirmationEmail) => void;
   /** Overrides the production Gmail notice. Tests pass a fake sink. */
-  readonly onOwnerPaid?: (notice: OwnerPaidNotice) => void | Promise<void>;
-  /** Fresh limiter for tests. Production uses the process-local map. */
+  readonly onOwnerPaid?: (notice: OwnerPaidNotice) => string | Promise<string>;
+  /** Fresh limiter for tests. Hosted enforcement uses the shared provider. */
   readonly throttle?: ConsultationThrottle;
   /** Shared jti ledger. Production uses the calendar store when this is omitted. */
   readonly networkLedger?: NetworkRedeemLedger;
@@ -220,6 +226,7 @@ async function book(
       });
     }
   }
+  if (claims) bookingId = `network-${await networkRedeemEventId(claims.jti)}`;
   const input = bookInputFromNetwork(parsed, claims);
   const origin = siteOrigin(request, env);
   const booked = await runConsultationBook(input, bookingId, {
@@ -391,6 +398,12 @@ async function webhook(
     try {
       const evidence = await refundedCheckoutFromStripe(env.stripeSecretKey, chargeId, fetchImpl);
       if (!evidence) return json(200, { received: true, status: 'ignored' });
+      if (
+        evidence.full &&
+        evidence.reservationUnavailable &&
+        !(await calendar.get(evidence.bookingId))
+      )
+        return json(200, { received: true, status: 'reservation_refunded' });
       const result = await applyVerifiedRefund(evidence, {
         calendar,
         fetch: fetchImpl,
@@ -405,7 +418,10 @@ async function webhook(
       return json(503, { error: 'refund-reconciliation' });
     }
   }
-  if (type !== 'checkout.session.completed') {
+  if (
+    type !== 'checkout.session.completed' &&
+    type !== 'checkout.session.async_payment_succeeded'
+  ) {
     return json(200, { received: true, status: 'ignored' });
   }
   const data =
@@ -430,6 +446,16 @@ async function webhook(
   let booking: Awaited<ReturnType<CalendarPort['get']>>;
   try {
     booking = await calendar.get(bookingId);
+    if (
+      booking?.status === 'slot_held' &&
+      (!booking.stripe_session_id || booking.stripe_session_id === sessionId)
+    ) {
+      booking = await calendar.updateBooking(bookingId, (current) => {
+        if (current.stripe_session_id && current.stripe_session_id !== sessionId)
+          throw new Error('checkout-binding');
+        return { ...current, stripe_session_id: sessionId };
+      });
+    }
   } catch {
     return json(500, { error: 'calendar' });
   }
@@ -453,13 +479,20 @@ async function webhook(
       onOwnerPaid:
         ownerSink ??
         (async (notice) => {
-          await deliverOwnerPaidNotice(env, notice, fetchImpl);
+          return deliverOwnerPaidNotice(env, notice, calendar, fetchImpl);
         }),
     },
   );
   if (!paid.ok) {
-    if (paid.error === 'hold-missing' || paid.error === 'hold-expired')
-      return json(409, { error: 'booking-expired' });
+    if (paid.error === 'hold-missing' || paid.error === 'hold-expired') {
+      try {
+        await refundUnavailableReservation(bookingId, sessionId, env.stripeSecretKey, fetchImpl);
+        return json(200, { received: true, status: 'reservation_refunded' });
+      } catch {
+        return json(503, { error: 'payment-reconciliation' });
+      }
+    }
+    if (paid.error === 'owner-notice') return json(503, { error: 'owner-notice-pending' });
     if (paid.error === 'booking-missing') return json(500, { error: 'booking-missing' });
     if (paid.error === 'payment-required') return json(200, { received: true, status: 'ignored' });
     return json(500, { error: 'calendar' });
@@ -539,7 +572,10 @@ async function assessBookingChange(
 
 function throttleFor(deps: ConsultationDeps): ConsultationThrottle {
   if (deps.throttle) return deps.throttle;
-  processThrottle ??= createConsultationThrottle();
+  processThrottle ??=
+    process.env.VERCEL || process.env.NODE_ENV === 'production'
+      ? createSharedConsultationThrottle()
+      : createConsultationThrottle();
   return processThrottle;
 }
 
@@ -572,7 +608,7 @@ export async function handleConsultationRequest(
 
   const now = (deps.now ?? (() => new Date()))();
   const throttle = throttleFor(deps);
-  const limited = throttle.consume(request, path, now.getTime());
+  const limited = await throttle.consume(request, path, now.getTime());
   if (limited) return limited;
 
   const env = deps.env ?? consultationEnvFromProcess();

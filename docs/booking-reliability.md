@@ -1,0 +1,22 @@
+# Booking reliability invariants
+
+Calendar extended properties remain the booking ledger; Stripe remains the payment and refund ledger. Gmail drafts own owner-notice delivery. This extends the existing owners without introducing a process-local fulfillment store.
+
+- Checkout has a fixed 40-minute expiry (above Stripe's 30-minute minimum), with recovery disabled. The create attempt is persisted before contacting Stripe, and creation has a booking-specific idempotency key. The returned session is bound before the URL is exposed.
+- Expiry alone cannot release a reservation. Stripe must confirm every bound or recovered Checkout is expired and unpaid. A timed-out create is recovered by a complete paginated listing; provider errors, incomplete pages, and pending payments retain the reservation. Pre-migration holds use the same provider check.
+- Calendar changes use ETags. A stale deletion cannot remove a newly paid booking. A stale payment cannot recreate a removed event. A conflicting paid session cannot replace the original session.
+- Delayed paid webhooks can finalize a retained reservation. An unavailable reservation produces a provider-persisted refund with a stable idempotency key. Pending compensation returns a retryable response.
+- Owner notices persist a Gmail draft ID before sending. Retries send that same draft; Gmail deletes it when sent. A stable Message-ID lets an ambiguous send recover provider evidence. Delivery is recorded only with a provider message ID; notification errors retain the calendar booking and make the webhook retryable. Buyer confirmation remains a draft.
+- Telemetry checks current consent before sending. URL queries/fragments, free-form error bodies and request credentials are excluded; tracing and replay remain disabled. Cookie preferences can be reopened, and browser privacy signals override an accept.
+
+Acceptance includes delayed and duplicate payments, create timeouts, expired/open/paid provider states, Calendar ETag conflicts, failed then replayed owner notices, ambiguous sends, consent withdrawal and URL redaction. Hosted acceptance additionally requires the approved provider credentials, shared quota configuration, private-content persistence, cross-tenant denial and refund/domain checks described in `consultation-actions.md`. Local fakes do not establish those hosted results.
+
+## Hosted acceptance and rollout
+
+The shared throttle checks `agency-consultation-availability`, `agency-consultation-book` and `agency-consultation-booking` through `@vercel/firewall`. Missing rules and provider errors return 503 before Calendar is touched; exceeded limits return 429 with a 60-second Retry-After. The maps remain local development enforcement and availability caching only. Vercel rate limits are regional; multi-region aggregate quotas require a global owner. Do not describe these counters as a global hard budget.
+
+`config/consultation-firewall.json` records the intended 30/10/30 requests per minute. `scripts/stage-consultation-firewall.ts` stages initial log-only rules at five times those limits. It never publishes. Review the staged diff, publish log mode, verify request matching, then enforce in preview and production using the maintained firewall workflow. Complete that acceptance before merging the mandatory shared-throttle consumer.
+
+Configuration inspection on November 16, 2026 found Calendar service-account and Stripe settings in preview/production, but no `STUDIO_OWNER_SESSION`, `STUDIO_CONTENT_API_URL` or `STUDIO_CONTENT_DEVICE_TOKEN`. Those missing bindings prevent hosted fulfillment acceptance. Configure them through the maintained secret workflow; never insert operator credentials into source or browser bundles. The delegated Google identity also requires `gmail.modify` for draft delivery and sent-message reconciliation. Scope presence has not been established by reading environment-variable names.
+
+Hosted evidence must cover consultation-only and add-on bookings, unpaid/pending denial, owner-authenticated writing/publication, buyer-authenticated reads, fresh-process reuse, cross-tenant denial, full and partial refund/revocation, and provider-verified domain routing. Keep issue #281 open until this evidence exists. The prior implementation is present; demo content does not prove acceptance.

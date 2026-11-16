@@ -1,10 +1,10 @@
 /** Consultation delivery adapts the maintained Calendar and content owners. */
 import { z } from 'zod';
-import type { Booking } from '../app/lib/consultation-booking';
-import { DOMAIN_ADD_ON_LABEL } from '../app/lib/domain-pack';
-import type { CalendarPort } from './consultation-calendar';
-import { refundedCheckoutFromStripe } from './consultation-stripe';
-import { providerFetch } from './provider-http';
+import type { Booking } from '../app/lib/consultation-booking.ts';
+import { DOMAIN_ADD_ON_LABEL } from '../app/lib/domain-pack.ts';
+import type { CalendarPort } from './consultation-calendar.ts';
+import { refundedCheckoutFromStripe } from './consultation-stripe.ts';
+import { providerFetch } from './provider-http.ts';
 
 const Identifier = z.string().regex(/^[a-zA-Z0-9_-]{1,100}$/);
 const Material = z.string().trim().min(1).max(30000);

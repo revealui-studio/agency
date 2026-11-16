@@ -3,7 +3,7 @@ name: CI
 # Build / typecheck / test gate for the agency site.
 #
 # This repo is a real external consumer of the published @revealui/* npm
-# packages and doubles as a smoke test for the npm distribution (see
+# contracts/router packages and the pinned presentation artifact (see
 # README.md). A breaking @revealui publish or a TypeScript regression must
 # surface as a red PR check HERE — not as a broken production deploy on
 # revealuistudio.com.

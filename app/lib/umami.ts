@@ -10,7 +10,20 @@
  *   VITE_UMAMI_WEBSITE_ID=0fbf4090-7768-47f8-9f85-5ab24a822160
  */
 
-const WEBSITE_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+import { z } from 'zod';
+import { analyticsAllowed, telemetryUrl } from './telemetry-privacy';
+
+export const UMAMI_BEFORE_SEND = 'agencyBeforeUmamiSend';
+
+/** Keep the callback installed after unmount: Umami's listeners may still be active. */
+export function sanitizeUmamiPayload(_type: string, payload: Record<string, unknown>) {
+  if (!analyticsAllowed()) return false;
+  const safe = { ...payload };
+  for (const key of ['url', 'referrer']) {
+    if (typeof safe[key] === 'string') safe[key] = telemetryUrl(safe[key]);
+  }
+  return safe;
+}
 
 export const UMAMI_SCRIPT_FLAG = 'data-revealui-umami';
 
@@ -25,7 +38,7 @@ export function readUmamiConfig(
   const rawUrl = typeof env.VITE_UMAMI_URL === 'string' ? env.VITE_UMAMI_URL.trim() : '';
   const websiteId =
     typeof env.VITE_UMAMI_WEBSITE_ID === 'string' ? env.VITE_UMAMI_WEBSITE_ID.trim() : '';
-  if (!rawUrl || !websiteId || !WEBSITE_ID.test(websiteId)) {
+  if (!rawUrl || !z.uuid().safeParse(websiteId).success) {
     return null;
   }
   try {

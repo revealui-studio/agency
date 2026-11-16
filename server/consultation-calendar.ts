@@ -10,14 +10,16 @@ import {
   applyPaidSchedule,
   type Booking,
   deskScheduleTransition,
+  ReservationUnavailableError,
   stageBFeeOf,
-} from '../app/lib/consultation-booking';
+} from '../app/lib/consultation-booking.ts';
 import {
   calendarInviteDescription,
   consultationCalendarSummary,
-} from '../app/lib/consultation-buyer';
-import type { TimeInterval } from '../app/lib/consultation-slots';
-import { providerFetch } from './provider-http';
+} from '../app/lib/consultation-buyer.ts';
+import type { TimeInterval } from '../app/lib/consultation-slots.ts';
+import { checkoutCanRelease } from './consultation-lifecycle.ts';
+import { providerFetch } from './provider-http.ts';
 
 const CALENDAR_SCOPE = 'https://www.googleapis.com/auth/calendar';
 const TOKEN_URL = 'https://oauth2.googleapis.com/token';
@@ -46,7 +48,8 @@ export interface CalendarPort {
   putHold(booking: Booking, now: Date): Promise<Booking>;
   release(bookingId: string): Promise<void>;
   get(bookingId: string): Promise<Booking | null>;
-  schedulePaid(booking: Booking, stripeSessionId: string): Promise<SchedulePaidResult>;
+  schedulePaid(booking: Booking, stripeSessionId: string, now?: Date): Promise<SchedulePaidResult>;
+  updateBooking(bookingId: string, update: (booking: Booking) => Booking): Promise<Booking>;
   recordRefund(
     bookingId: string,
     stripeSessionId: string,
@@ -127,7 +130,13 @@ export function calendarConfigured(env: ConsultationEnv): boolean {
 
 function overlaps(row: Booking, start: string, end: string, now: Date, ignoreId?: string): boolean {
   if (ignoreId && row.booking_id === ignoreId) return false;
-  if (row.status === 'slot_held' && Date.parse(row.expires_at) <= now.getTime()) return false;
+  if (
+    row.status === 'slot_held' &&
+    !row.checkout_started_at &&
+    !row.stripe_session_id &&
+    Date.parse(row.expires_at) <= now.getTime()
+  )
+    return false;
   return Date.parse(row.start) < Date.parse(end) && Date.parse(start) < Date.parse(row.end);
 }
 
@@ -179,15 +188,36 @@ function applyDomainPackReview(
   return { ...booking, refund: { ...booking.refund, domainPackReview: decision } };
 }
 
-export function createMemoryCalendar(seed: readonly Booking[] = []): CalendarPort {
+function paidBase(booking: Booking | null, sessionId: string, now: Date): Booking {
+  if (
+    !booking ||
+    !sessionId ||
+    (booking.stripe_session_id && booking.stripe_session_id !== sessionId)
+  )
+    throw new ReservationUnavailableError();
+  if (booking.status === 'paid_scheduled') return booking;
+  if (!booking.stripe_session_id && Date.parse(booking.expires_at) <= now.getTime())
+    throw new ReservationUnavailableError();
+  return booking;
+}
+
+export function createMemoryCalendar(
+  seed: readonly Booking[] = [],
+  canRelease: (booking: Booking, now: Date) => Promise<boolean> = async (booking) =>
+    !booking.checkout_started_at && !booking.stripe_session_id,
+): CalendarPort {
   const rows = new Map<string, Booking>();
   for (const booking of seed) rows.set(booking.booking_id, booking);
 
   return {
     async expireHolds(now) {
       for (const [id, row] of rows) {
-        if (row.status === 'slot_held' && Date.parse(row.expires_at) <= now.getTime()) {
-          rows.delete(id);
+        if (
+          row.status === 'slot_held' &&
+          Date.parse(row.expires_at) <= now.getTime() &&
+          (await canRelease(row, now))
+        ) {
+          if (rows.get(id) === row) rows.delete(id);
         }
       }
     },
@@ -214,7 +244,12 @@ export function createMemoryCalendar(seed: readonly Booking[] = []): CalendarPor
     },
     async release(bookingId) {
       const row = rows.get(bookingId);
-      if (row?.status === 'slot_held') rows.delete(bookingId);
+      if (
+        row?.status === 'slot_held' &&
+        (await canRelease(row, new Date())) &&
+        rows.get(bookingId) === row
+      )
+        rows.delete(bookingId);
     },
     async get(bookingId) {
       return rows.get(bookingId) ?? null;
@@ -234,8 +269,15 @@ export function createMemoryCalendar(seed: readonly Booking[] = []): CalendarPor
       rows.set(bookingId, updated);
       return updated;
     },
-    async schedulePaid(booking, stripeSessionId) {
-      const existing = rows.get(booking.booking_id);
+    async updateBooking(bookingId, update) {
+      const current = rows.get(bookingId);
+      if (!current) throw new ReservationUnavailableError();
+      const next = update(current);
+      rows.set(bookingId, next);
+      return next;
+    },
+    async schedulePaid(booking, stripeSessionId, now = new Date()) {
+      const existing = paidBase(rows.get(booking.booking_id) ?? null, stripeSessionId, now);
       if (existing?.status === 'paid_scheduled') {
         return {
           booking: existing,
@@ -243,7 +285,7 @@ export function createMemoryCalendar(seed: readonly Booking[] = []): CalendarPor
           desk: deskScheduleTransition(existing).reason,
         };
       }
-      const applied = applyPaidSchedule(existing ?? booking, {
+      const applied = applyPaidSchedule(existing, {
         meetLink: `https://meet.google.com/lookup/${booking.booking_id}`,
         eventId: existing?.event_id ?? `evt_${booking.booking_id}`,
         stripeSessionId,
@@ -414,6 +456,9 @@ function propsOf(booking: Booking): Record<string, string> {
     network_jti: booking.network_jti ?? '',
     meet_link: booking.meet_link ?? '',
     stripe_session_id: booking.stripe_session_id ?? '',
+    checkout_started_at: booking.checkout_started_at ?? '',
+    owner_notice_draft: booking.owner_notice?.draftId ?? '',
+    owner_notice_message: booking.owner_notice?.messageId ?? '',
     refund_charge_id: booking.refund?.chargeId ?? '',
     refund_amount: String(booking.refund?.amountRefunded ?? 0),
     refund_full: booking.refund?.full ? 'true' : 'false',
@@ -483,6 +528,23 @@ function bookingFromEvent(event: Record<string, unknown>): Booking | null {
   const eventId = typeof event.id === 'string' ? event.id : null;
   return {
     booking_id: props.booking_id,
+    ...(typeof props.checkout_started_at === 'string' && props.checkout_started_at
+      ? { checkout_started_at: props.checkout_started_at }
+      : {}),
+    ...(props.owner_notice_draft || props.owner_notice_message
+      ? {
+          owner_notice: {
+            draftId:
+              typeof props.owner_notice_draft === 'string' && props.owner_notice_draft
+                ? props.owner_notice_draft
+                : undefined,
+            messageId:
+              typeof props.owner_notice_message === 'string' && props.owner_notice_message
+                ? props.owner_notice_message
+                : undefined,
+          },
+        }
+      : {}),
     start: typeof props.start === 'string' ? props.start : '',
     end: typeof props.end === 'string' ? props.end : '',
     hours,
@@ -621,9 +683,47 @@ export function createGoogleCalendar(
     return next;
   }
 
+  function matchEvent(event: Record<string, unknown>): Headers {
+    if (typeof event.etag !== 'string' || !event.etag) throw new Error('calendar-version-missing');
+    return new Headers({ 'if-match': event.etag });
+  }
+
+  async function removeHold(event: Record<string, unknown>, booking: Booking, now: Date) {
+    if (
+      !booking.event_id ||
+      !(await checkoutCanRelease(booking, now, env.stripeSecretKey, fetchImpl))
+    )
+      return;
+    const token = await accessToken(env, fetchImpl, CALENDAR_SCOPE);
+    try {
+      await googleSend(
+        `${collection}/${encodeURIComponent(booking.event_id)}?sendUpdates=none`,
+        token,
+        { method: 'DELETE', headers: matchEvent(event) },
+        fetchImpl,
+      );
+    } catch (error) {
+      if (!(error instanceof Error) || error.message !== 'google-calendar:412') throw error;
+      // A payment or another workflow transition won. Never retry the stale deletion.
+      await findByBooking(booking.booking_id);
+    }
+  }
+
   return {
+    async updateBooking(bookingId, update) {
+      for (let attempt = 0; attempt < 3; attempt += 1) {
+        try {
+          return await updateRefund(bookingId, (current) => {
+            if (!current) throw new ReservationUnavailableError();
+            return update(current);
+          });
+        } catch (error) {
+          if (!(error instanceof Error) || error.message !== 'google-calendar:412') throw error;
+        }
+      }
+      throw new Error('calendar-contention');
+    },
     async expireHolds(now) {
-      const token = await accessToken(env, fetchImpl, CALENDAR_SCOPE);
       const events = await listEvents({
         privateExtendedProperty: 'status=slot_held',
         singleEvents: 'true',
@@ -634,8 +734,7 @@ export function createGoogleCalendar(
         if (!slotHeld(booking)) continue;
         if (Date.parse(booking.expires_at) > now.getTime()) continue;
         if (!booking.event_id) continue;
-        const url = `${collection}/${encodeURIComponent(booking.event_id)}?sendUpdates=none`;
-        await googleSend(url, token, { method: 'DELETE' }, fetchImpl);
+        await removeHold(event, booking, now);
       }
     },
     async busy(from, to) {
@@ -725,13 +824,7 @@ export function createGoogleCalendar(
       const event = await findByBooking(bookingId);
       const booking = event ? bookingFromEvent(event) : null;
       if (!slotHeld(booking) || !booking.event_id) return;
-      const token = await accessToken(env, fetchImpl, CALENDAR_SCOPE);
-      await googleSend(
-        `${collection}/${encodeURIComponent(booking.event_id)}?sendUpdates=none`,
-        token,
-        { method: 'DELETE' },
-        fetchImpl,
-      );
+      if (event) await removeHold(event, booking, new Date());
     },
     async get(bookingId) {
       const event = await findByBooking(bookingId);
@@ -747,39 +840,52 @@ export function createGoogleCalendar(
         applyDomainPackReview(booking, chargeId, amountRefunded, decision),
       );
     },
-    async schedulePaid(booking, stripeSessionId) {
+    async schedulePaid(booking, stripeSessionId, now = new Date()) {
       const existingEvent = await findByBooking(booking.booking_id);
-      const existing = existingEvent ? bookingFromEvent(existingEvent) : null;
-      if (existing?.status === 'paid_scheduled') {
-        return {
-          booking: existing,
-          action: 'already_scheduled',
-          desk: 'no-desk-writer',
-        };
-      }
+      const base = paidBase(
+        existingEvent ? bookingFromEvent(existingEvent) : null,
+        stripeSessionId,
+        now,
+      );
+      if (base.status === 'paid_scheduled')
+        return { booking: base, action: 'already_scheduled', desk: 'no-desk-writer' };
+      if (!existingEvent || !base.event_id) throw new ReservationUnavailableError();
       const token = await accessToken(env, fetchImpl, CALENDAR_SCOPE);
-      const base = existing ?? booking;
-      const draft: Booking = { ...base, stripe_session_id: stripeSessionId };
-      const paidBody = eventBody({ ...draft, status: 'paid_scheduled' }, 'paid');
-      let saved: Record<string, unknown> | null = null;
-      if (existing?.event_id) {
+      let saved: Record<string, unknown> | null;
+      try {
         saved = asRecord(
           await googleSend(
-            `${collection}/${encodeURIComponent(existing.event_id)}?conferenceDataVersion=1&sendUpdates=all`,
+            `${collection}/${encodeURIComponent(base.event_id)}?conferenceDataVersion=1&sendUpdates=all`,
             token,
-            { method: 'PATCH', body: JSON.stringify(paidBody) },
+            {
+              method: 'PATCH',
+              headers: matchEvent(existingEvent),
+              body: JSON.stringify(
+                eventBody(
+                  { ...base, stripe_session_id: stripeSessionId, status: 'paid_scheduled' },
+                  'paid',
+                ),
+              ),
+            },
             fetchImpl,
           ),
         );
-      } else {
-        saved = asRecord(
-          await googleSend(
-            `${collection}?conferenceDataVersion=1&sendUpdates=all`,
-            token,
-            { method: 'POST', body: JSON.stringify(paidBody) },
-            fetchImpl,
-          ),
+      } catch (error) {
+        if (
+          error instanceof Error &&
+          ['google-calendar:404', 'google-calendar:410'].includes(error.message)
+        )
+          throw new ReservationUnavailableError();
+        if (!(error instanceof Error) || error.message !== 'google-calendar:412') throw error;
+        const latestEvent = await findByBooking(booking.booking_id);
+        const latest = paidBase(
+          latestEvent ? bookingFromEvent(latestEvent) : null,
+          stripeSessionId,
+          now,
         );
+        if (latest.status === 'paid_scheduled')
+          return { booking: latest, action: 'already_scheduled', desk: 'no-desk-writer' };
+        throw new Error('calendar-contention');
       }
       if (!saved || typeof saved.id !== 'string') throw new Error('google-calendar');
       const applied = applyPaidSchedule(base, {

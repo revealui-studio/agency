@@ -3,7 +3,7 @@
 Buyer path on Preview and test:
 
 1. `/consultation/book` lists weekday slots, 09:00–17:00 America/New_York, in 1-hour steps. A booking is 1 to 8 contiguous hours and must end by 17:00.
-2. `save_slot` creates a 20-minute hold. `create_checkout_session` opens Stripe Checkout only while that hold is live.
+2. `save_slot` creates a 40-minute hold. `create_checkout_session` opens Stripe Checkout only while that hold is live.
 3. `checkout.session.completed` runs `write_calendar_meet_on_pay`, then `notify_owner_paid` to founder@revealui.com, then `send_confirm_email` as a draft. The buyer invite is the Calendar event with Google Meet. Buyer mail stays unsent.
 4. The public Google Appointments URL (`INTRO_CALL_URL` in `app/lib/site.ts`) stays the free 30-minute intro only. It is not the Consultation booking path.
 
@@ -19,7 +19,7 @@ Set these on the Preview project. Do not commit them.
 - `GOOGLE_CALENDAR_ID` — founder calendar id
 - `GOOGLE_OAUTH_CLIENT_ID`
 - `GOOGLE_OAUTH_CLIENT_SECRET`
-- `GOOGLE_OAUTH_REFRESH_TOKEN` — preferred. Google Meet creation on a consumer calendar needs this. Owner notify also needs `gmail.send` on that token. A calendar-only token cannot deliver the founder notice.
+- `GOOGLE_OAUTH_REFRESH_TOKEN` — preferred. Google Meet creation on a consumer calendar needs this. Owner notify also needs `gmail.modify` on that token. A calendar-only token cannot deliver the founder notice.
 - `GOOGLE_CLIENT_EMAIL` and `GOOGLE_PRIVATE_KEY` — service-account fallback when the refresh token is unset. The value is PKCS#8 material; escaped newlines are accepted
 - `GOOGLE_IMPERSONATE_SUBJECT` — optional Workspace user for domain-wide delegation. Studio sets `founder@revealui.com`. The service-account JWT includes `sub` only when this is non-empty. It is never copied from `GOOGLE_CALENDAR_ID`. The OAuth trio still wins when all three OAuth vars are set
 - Confirmation after pay is a draft (`send_confirm_email`, gate `draft_only`). The buyer invite is the Calendar event with Google Meet. This repo does not send that draft. Template: `docs/consultation-confirm-email.md`. Action table: `docs/consultation-actions.md`
@@ -43,7 +43,7 @@ One-time Workspace Admin step. After it propagates, an external calendar share i
 
 1. Admin → Security → Access and data control → API controls → Domain-wide delegation.
 2. Add or edit the client for the service account OAuth 2 Client ID in GCP. The account is `revealui-email@gen-lang-client-0097496289.iam.gserviceaccount.com`.
-3. Scopes: `https://www.googleapis.com/auth/calendar` and `https://www.googleapis.com/auth/gmail.send`. Add `https://www.googleapis.com/auth/gmail.compose` so a denied send can still store a founder draft.
+3. Scopes: `https://www.googleapis.com/auth/calendar` and `https://www.googleapis.com/auth/gmail.modify` (create/send a persistent draft and recover sent-message evidence after a transport failure).
 4. Save. Wait a few minutes.
 5. Set `GOOGLE_IMPERSONATE_SUBJECT=founder@revealui.com` on the agency Preview and Production targets, then redeploy Preview.
 
@@ -82,3 +82,5 @@ The coupon's product restriction is Stripe-side. Resolve the product from the li
 - Auto-promote or an automatic buyer email
 - Reusing smoke coupons (`MURPA9ra`, `2SQzIIr5`) for live buyers
 - Creating the live coupon or seeding the secret inside the application PR
+
+Booking expiry, provider reconciliation, delivery retries and telemetry controls are specified in [booking reliability](booking-reliability.md). A wall-clock expiry alone does not release a Checkout-backed reservation.

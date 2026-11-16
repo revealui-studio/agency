@@ -1,0 +1,10 @@
+{
+  "project": "revealui-agency",
+  "windowSeconds": 60,
+  "algorithm": "fixed_window",
+  "rules": [
+    { "id": "agency-consultation-availability", "requests": 30 },
+    { "id": "agency-consultation-book", "requests": 10 },
+    { "id": "agency-consultation-booking", "requests": 30 }
+  ]
+}

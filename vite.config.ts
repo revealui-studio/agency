@@ -4,12 +4,12 @@ import { fileURLToPath } from 'node:url';
 import tailwindcss from '@tailwindcss/vite';
 import react from '@vitejs/plugin-react';
 import { defineConfig, type Plugin } from 'vite';
-import { STUDIO_BLOG_FEED_PATH } from './app/lib/blog-copy';
-import { writeStudioRouteHtml } from './app/lib/route-html';
-import { RSS_CONTENT_TYPE, renderStudioRss } from './app/lib/rss';
-import { isConsultationDomainHost } from './app/lib/share-host';
-import { handleConsultationRequest } from './server/consultation-http';
-import { handleShareRequest } from './server/share-http';
+import { STUDIO_BLOG_FEED_PATH } from './app/lib/blog-copy.ts';
+import { writeStudioRouteHtml } from './app/lib/route-html.ts';
+import { RSS_CONTENT_TYPE, renderStudioRss } from './app/lib/rss.ts';
+import { isConsultationDomainHost } from './app/lib/share-host.ts';
+import { handleConsultationRequest } from './server/consultation-http.ts';
+import { handleShareRequest } from './server/share-http.ts';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 

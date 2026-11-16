@@ -6,6 +6,20 @@
 
 export const COOKIE_NAME = 'revealui-cookie-consent';
 const MAX_AGE = 180 * 24 * 60 * 60;
+export const CONSENT_CHANGED = 'revealui-consent-changed';
+export const CONSENT_PREFERENCES = 'revealui-consent-preferences';
+
+export function privacySignal(): boolean {
+  if (typeof navigator === 'undefined') return false;
+  return (
+    navigator.doNotTrack === '1' ||
+    ('globalPrivacyControl' in navigator && navigator.globalPrivacyControl === true)
+  );
+}
+
+export function openConsentPreferences(): void {
+  window.dispatchEvent(new Event(CONSENT_PREFERENCES));
+}
 
 export interface AgencyConsent {
   necessary: boolean;
@@ -22,6 +36,7 @@ export const DENIED: AgencyConsent = {
 };
 
 export function readConsent(): { consent: AgencyConsent; decided: boolean } {
+  if (privacySignal()) return { consent: DENIED, decided: true };
   if (typeof document === 'undefined') {
     return { consent: DENIED, decided: false };
   }
@@ -54,7 +69,7 @@ export function readConsent(): { consent: AgencyConsent; decided: boolean } {
 
 export function writeConsent(consent: AgencyConsent): void {
   const payload = {
-    ...consent,
+    ...(privacySignal() ? DENIED : consent),
     necessary: true,
     version: 1,
     updatedAt: new Date().toISOString(),
@@ -64,4 +79,11 @@ export function writeConsent(consent: AgencyConsent): void {
   // First-party consent cookie must be JS-readable (not HttpOnly).
   // biome-ignore lint/suspicious/noDocumentCookie: this module is the consent cookie writer
   document.cookie = `${COOKIE_NAME}=${encodeURIComponent(JSON.stringify(payload))}; Path=/; Max-Age=${MAX_AGE}; SameSite=Lax${secure}`;
+  window.dispatchEvent(new Event(CONSENT_CHANGED));
+  // Notify other tabs without storing telemetry or a second consent record.
+  try {
+    localStorage.setItem(CONSENT_CHANGED, crypto.randomUUID());
+  } catch {
+    // Cookie remains the source of truth when storage is unavailable.
+  }
 }

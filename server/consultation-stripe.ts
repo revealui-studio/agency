@@ -4,9 +4,9 @@
  */
 
 import { z } from 'zod';
-import type { Booking } from '../app/lib/consultation-booking';
-import { type CheckoutLine, encodeCheckoutForm } from '../app/lib/consultation-checkout';
-import { providerFetch } from './provider-http';
+import type { Booking } from '../app/lib/consultation-booking.ts';
+import { type CheckoutLine, encodeCheckoutForm } from '../app/lib/consultation-checkout.ts';
+import { providerFetch } from './provider-http.ts';
 
 const TOLERANCE_MS = 5 * 60 * 1000;
 
@@ -87,6 +87,7 @@ export async function verifyStripeSignature(
 export async function createStripeCheckout(input: {
   readonly secretKey: string;
   readonly formBody: string;
+  readonly idempotencyKey?: string;
   readonly fetchImpl?: typeof fetch;
 }): Promise<{ id: string; url: string }> {
   const fetchImpl = input.fetchImpl ?? fetch;
@@ -96,6 +97,7 @@ export async function createStripeCheckout(input: {
       method: 'POST',
       headers: {
         authorization: `Bearer ${input.secretKey}`,
+        ...(input.idempotencyKey ? { 'idempotency-key': input.idempotencyKey } : {}),
         'content-type': 'application/x-www-form-urlencoded',
       },
       body: input.formBody,
@@ -146,6 +148,7 @@ export async function refundedCheckoutFromStripe(
     amount: z.number().int().positive(),
     currency: z.literal('usd'),
     status: z.string(),
+    metadata: z.record(z.string(), z.string()).optional(),
   });
   const refunds: z.infer<typeof refundSchema>[] = [];
   const refundIds = new Set<string>();
@@ -212,6 +215,12 @@ export async function refundedCheckoutFromStripe(
     chargeId,
     amountRefunded: refunded,
     full: refunded === charge.amount,
+    reservationUnavailable: succeeded.some(
+      (refund) =>
+        refund.metadata?.reason === 'reservation_unavailable' &&
+        refund.metadata.checkout_session === session.id &&
+        refund.metadata.booking_id === session.metadata?.booking_id,
+    ),
   };
 }
 
@@ -225,6 +234,7 @@ export function stripeFromEnv(
     async createCheckout(input) {
       const formBody = encodeCheckoutForm({
         lines: input.lines,
+        expiresAt: input.booking.expires_at,
         bookingId: input.booking.booking_id,
         start: input.booking.start,
         end: input.booking.end,
@@ -239,7 +249,12 @@ export function stripeFromEnv(
         successUrl: input.successUrl,
         cancelUrl: input.cancelUrl,
       });
-      return createStripeCheckout({ secretKey: secret, formBody, fetchImpl });
+      return createStripeCheckout({
+        secretKey: secret,
+        formBody,
+        fetchImpl,
+        idempotencyKey: `consultation:${input.booking.booking_id}`,
+      });
     },
   };
 }

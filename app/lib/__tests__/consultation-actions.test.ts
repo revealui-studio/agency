@@ -81,9 +81,10 @@ function harness(seed: readonly Booking[] = []) {
     putHold: (booking: Booking, now: Date) => calendar.putHold(booking, now),
     release: (bookingId: string) => calendar.release(bookingId),
     get: (bookingId: string) => calendar.get(bookingId),
-    schedulePaid: async (booking: Booking, sessionId: string) => {
+    updateBooking: calendar.updateBooking,
+    schedulePaid: async (booking: Booking, sessionId: string, now?: Date) => {
       schedules += 1;
-      return calendar.schedulePaid(booking, sessionId);
+      return calendar.schedulePaid(booking, sessionId, now);
     },
   };
   const stripe: ActionStripe = {
@@ -106,6 +107,7 @@ function harness(seed: readonly Booking[] = []) {
     },
     onOwnerPaid: (notice) => {
       owners.push(notice);
+      return `msg_${notice.bookingId}`;
     },
   };
   return { calendar, checkouts, drafts, owners, deps, schedules: () => schedules };
@@ -261,7 +263,7 @@ describe('consultation action registry', () => {
     expect(allowed.checkouts[0]?.stageBFee).toBe('waived_network');
   });
 
-  it('releases the hold when Checkout fails', async () => {
+  it('retains an ambiguous Checkout attempt until provider reconciliation', async () => {
     const { deps, calendar } = harness();
     const failing: ActionStripe = {
       async createCheckout() {
@@ -273,7 +275,7 @@ describe('consultation action registry', () => {
       stripe: failing,
     });
     expect(result).toEqual({ ok: false, error: 'checkout' });
-    expect(await calendar.get('book_fail')).toBeNull();
+    expect((await calendar.get('book_fail'))?.checkout_started_at).toBe(NOW.toISOString());
   });
 
   it('writes Google Meet once, notifies the founder, and skips a replay', async () => {
@@ -346,8 +348,8 @@ describe('consultation action registry', () => {
     if (!second.ok) return;
     expect(second.value.action).toBe('already_scheduled');
     expect(second.value.confirm).toBeNull();
-    expect(second.value.owner).toBeNull();
-    expect(schedules()).toBe(1);
+    expect(second.value.owner?.invoked).toBe(false);
+    expect(schedules()).toBe(2);
     expect(drafts).toHaveLength(1);
     expect(owners).toHaveLength(1);
   });
@@ -363,7 +365,7 @@ describe('consultation action registry', () => {
     const paid = await runPaidConsultation(
       {
         paymentStatus: 'paid',
-        sessionId: 'cs_net',
+        sessionId: 'cs_test_1',
         metadata: { booking_id: 'book_net' },
         booking: await calendar.get('book_net'),
         amountTotal: null,
@@ -375,18 +377,18 @@ describe('consultation action registry', () => {
         },
       },
     );
-    expect(paid.ok).toBe(true);
-    if (!paid.ok) return;
-    expect(paid.value.action).toBe('scheduled');
-    expect(paid.value.desk).toBe('no-desk-writer');
-    expect(paid.value.owner?.invoked).toBe(true);
-    expect(paid.value.owner?.notice.network).toBe(true);
-    expect(paid.value.owner?.notice.stageB).toBe(true);
-    expect(paid.value.owner?.notice.amountCents).toBe(30_000);
-    expect(paid.value.owner?.notice.text).toContain('Domain add-on: yes');
-    expect(paid.value.owner?.notice.text).toContain('Network: yes');
-    expect(paid.value.owner?.notice.text).toContain('Amount: $300');
-    expect(paid.value.owner?.notice.to).toBe('founder@revealui.com');
+    expect(paid).toEqual({ ok: false, error: 'owner-notice' });
+    const replay = await runPaidConsultation(
+      {
+        paymentStatus: 'paid',
+        sessionId: 'cs_test_1',
+        metadata: { booking_id: 'book_net' },
+        booking: await calendar.get('book_net'),
+      },
+      deps,
+    );
+    expect(replay.ok).toBe(true);
+    expect((await calendar.get('book_net'))?.owner_notice?.messageId).toBe('msg_book_net');
     expect((await calendar.get('book_net'))?.status).toBe('paid_scheduled');
   });
 

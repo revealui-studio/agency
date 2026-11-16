@@ -6,10 +6,10 @@
  * a negative line item.
  */
 
-import type { StageBFee } from './consultation-booking';
-import { CONSULTATION_UNIT_CENTS, consultationDueCents } from './consultation-hours';
-import { DOMAIN_ADD_ON_LABEL } from './domain-pack';
-import { CONSULTATION, CONSULTATION_PRICE, STAGE_B_CENTS, STAGE_B_PRICE } from './engagements';
+import type { StageBFee } from './consultation-booking.ts';
+import { CONSULTATION_UNIT_CENTS, consultationDueCents } from './consultation-hours.ts';
+import { DOMAIN_ADD_ON_LABEL } from './domain-pack.ts';
+import { CONSULTATION, CONSULTATION_PRICE, STAGE_B_CENTS, STAGE_B_PRICE } from './engagements.ts';
 
 /** Live Consultation price. $300 per hour. Override with STRIPE_CONSULTATION_PRICE_ID. */
 export const DEFAULT_CONSULTATION_PRICE_ID = 'price_1TxpQTJz64n6uEibitNE5eJP' as const;
@@ -174,6 +174,7 @@ export function encodeCheckoutForm(input: {
   readonly successUrl: string;
   readonly cancelUrl: string;
   readonly integrationIdentifier?: string;
+  readonly expiresAt?: string;
 }): string {
   const stageBFee: StageBFee = input.stageBFee ?? (input.stageB ? 'paid_addon' : 'none');
   if (stageBFee === 'waived_network') {
@@ -186,6 +187,9 @@ export function encodeCheckoutForm(input: {
 
   const params = new URLSearchParams();
   params.set('mode', 'payment');
+  if (input.expiresAt)
+    params.set('expires_at', String(Math.floor(Date.parse(input.expiresAt) / 1000)));
+  params.set('after_expiration[recovery][enabled]', 'false');
   params.set('client_reference_id', input.bookingId);
   params.set('success_url', input.successUrl);
   params.set('cancel_url', input.cancelUrl);

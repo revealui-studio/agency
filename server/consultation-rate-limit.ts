@@ -1,23 +1,7 @@
 /**
- * Best-effort throttle for consultation availability, booking, and booking lookup.
- *
- * Each availability read lists held calendar events (up to 50). A burst from one
- * address can burn that quota. This limiter counts requests in a fixed window,
- * keyed by caller address, and returns 429 with Retry-After when the window is full.
- *
- * The maps live in this process. Serverless instances do not share memory, so a
- * flood can still land on many instances. This is a first line against accidental
- * loops and single-instance abuse. There is no background timer: expired rows are
- * dropped on a later request, and both maps stay under a fixed cap.
- *
- * This server has no shared store. If one is added later, the upgrade path is an
- * atomic increment per route and address with the same window, limit, and
- * Retry-After contract. Replace the maps in this module and keep the behavior below.
- *
- * Identical availability queries share one in-flight calendar read and a short
- * result cache. The cached body is the public slot list. Booking writes are not
- * cached. A few seconds of staleness is safe because a taken slot still fails
- * when the booking is saved.
+ * Local development throttle and per-instance availability cache.
+ * Hosted requests use consultation-shared-throttle for authoritative quotas.
+ * This map is never the enforcement fallback when the shared provider fails.
  */
 
 const UNKNOWN_ADDRESS = 'unknown';
@@ -43,10 +27,18 @@ export interface ConsultationRateConfig {
 export type ConsultationRoute = 'availability' | 'book' | 'booking';
 
 export interface ConsultationThrottle {
-  consume(request: Request, path: string, nowMs: number): Response | null;
+  consume(
+    request: Request,
+    path: string,
+    nowMs: number,
+  ): Response | null | Promise<Response | null>;
   loadAvailability<T>(key: string, nowMs: number, load: () => Promise<T>): Promise<T>;
   keyCount(): number;
   cacheCount(): number;
+}
+
+export interface LocalConsultationThrottle extends ConsultationThrottle {
+  consume(request: Request, path: string, nowMs: number): Response | null;
 }
 
 interface Bucket {
@@ -290,7 +282,7 @@ function dropOldest<T>(map: Map<string, T>, maxKeys: number): void {
 
 export function createConsultationThrottle(
   config: ConsultationRateConfig = consultationRateConfigFromEnv(),
-): ConsultationThrottle {
+): LocalConsultationThrottle {
   const buckets = new Map<string, Bucket>();
   const cache = new Map<string, CacheEntry>();
   const inflight = new Map<string, Promise<unknown>>();
