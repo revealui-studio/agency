@@ -67,6 +67,7 @@ export async function checkoutCanRelease(
       const query = new URLSearchParams({
         limit: '100',
         'created[gte]': String(Math.floor(created / 1000) - 60),
+        'created[lte]': String(Math.ceil(expiry / 1000) + 60),
       });
       if (cursor) query.set('starting_after', cursor);
       const list = z
