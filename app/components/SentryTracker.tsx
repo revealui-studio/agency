@@ -1,5 +1,4 @@
 import { useEffect } from 'react';
-import { initSentry } from '@/lib/sentry';
 
 /**
  * Initialises the Sentry browser SDK once. Parent must only mount this
@@ -8,7 +7,15 @@ import { initSentry } from '@/lib/sentry';
  */
 export function SentryTracker() {
   useEffect(() => {
-    initSentry();
+    let active = true;
+    async function start() {
+      const { initSentry } = await import('@/lib/sentry');
+      if (active) initSentry();
+    }
+    void start();
+    return () => {
+      active = false;
+    };
   }, []);
 
   return null;

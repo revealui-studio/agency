@@ -3,14 +3,14 @@
  * matches the path slug. They are not files under `public/`.
  */
 
-import { STAGE_B_ADDON, STAGE_B_DETAIL } from '../app/lib/consultation-buyer';
+import { STAGE_B_ADDON, STAGE_B_DETAIL } from '../app/lib/consultation-buyer.ts';
 import {
   DOMAIN_ADD_ON_LABEL,
   DOMAIN_PACK_PAGES,
   type DomainPackPageId,
   domainPackLines,
-} from '../app/lib/domain-pack';
-import { STAGE_B_PRICE } from '../app/lib/engagements';
+} from '../app/lib/domain-pack.ts';
+import { STAGE_B_PRICE } from '../app/lib/engagements.ts';
 
 function exampleNote(route: string, lines: readonly string[]): string {
   return [

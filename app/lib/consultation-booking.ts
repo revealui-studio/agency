@@ -5,10 +5,16 @@
  * network token on the server. Body fields `waive` and `stage_b_fee` are ignored.
  */
 
-import { confirmationSubject, confirmationText } from './consultation-buyer';
-import { CONSULTATION_HOUR_MAX, CONSULTATION_HOUR_MIN } from './consultation-hours';
-import type { NetworkWaiveClaims } from './consultation-network-waive';
-import { HOLD_TTL_MS } from './consultation-slots';
+import { confirmationSubject, confirmationText } from './consultation-buyer.ts';
+import { CONSULTATION_HOUR_MAX, CONSULTATION_HOUR_MIN } from './consultation-hours.ts';
+import type { NetworkWaiveClaims } from './consultation-network-waive.ts';
+import { HOLD_TTL_MS } from './consultation-slots.ts';
+
+export class ReservationUnavailableError extends Error {
+  constructor() {
+    super('reservation-unavailable');
+  }
+}
 
 export type BookingStatus = 'slot_held' | 'paid_scheduled';
 
@@ -31,6 +37,9 @@ export interface Booking {
   readonly event_id: string | null;
   readonly meet_link: string | null;
   readonly stripe_session_id: string | null;
+  /** Persisted before the first provider request; protects ambiguous Checkout creation. */
+  readonly checkout_started_at?: string;
+  readonly owner_notice?: { readonly draftId?: string; readonly messageId?: string };
   /** Verified provider evidence, persisted by the owning Calendar ledger. */
   readonly refund?: {
     readonly chargeId: string;

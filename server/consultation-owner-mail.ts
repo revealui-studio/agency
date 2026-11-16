@@ -1,100 +1,124 @@
-/**
- * Deliver the paid Consultation notice to founder@revealui.com.
- *
- * Prefer Gmail send. If send is denied, store a durable Gmail draft.
- * The buyer is never the recipient. No second mail provider.
- */
+/** Gmail drafts are the durable send operation. Replays use the same draft ID. */
 
-import { OWNER_NOTIFY_EMAIL, type OwnerPaidNotice } from '../app/lib/consultation-owner';
-import { type ConsultationEnv, googleAccessToken } from './consultation-calendar';
-import { providerFetch } from './provider-http';
+import { z } from 'zod';
+import { OWNER_NOTIFY_EMAIL, type OwnerPaidNotice } from '../app/lib/consultation-owner.ts';
+import {
+  type CalendarPort,
+  type ConsultationEnv,
+  googleAccessToken,
+} from './consultation-calendar.ts';
+import { providerFetch } from './provider-http.ts';
 
-const GMAIL_SEND_SCOPE = 'https://www.googleapis.com/auth/gmail.send';
-const GMAIL_COMPOSE_SCOPE = 'https://www.googleapis.com/auth/gmail.compose';
-const SEND_URL = 'https://gmail.googleapis.com/gmail/v1/users/me/messages/send';
-const DRAFT_URL = 'https://gmail.googleapis.com/gmail/v1/users/me/drafts';
-
-export type OwnerMailDelivery = 'sent' | 'draft' | 'unconfigured' | 'failed';
+const GMAIL_SCOPE = 'https://www.googleapis.com/auth/gmail.modify';
+const GMAIL = 'https://gmail.googleapis.com/gmail/v1/users/me';
 
 export function ownerMailConfigured(env: ConsultationEnv): boolean {
-  const refresh = Boolean(env.oauthClientId && env.oauthClientSecret && env.oauthRefreshToken);
-  const service = Boolean(env.googleClientEmail && env.googleCredential);
-  return refresh || service;
+  return Boolean(
+    (env.oauthClientId && env.oauthClientSecret && env.oauthRefreshToken) ||
+      (env.googleClientEmail && env.googleCredential),
+  );
 }
 
-function base64Url(bytes: Uint8Array): string {
-  let binary = '';
-  for (let i = 0; i < bytes.length; i += 0x8000) {
-    binary += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
-  }
-  return btoa(binary).replaceAll('+', '-').replaceAll('/', '_').replace(/=+$/u, '');
-}
-
-/** RFC 5322 message. Headers address the founder only. */
-export function ownerPaidRfc822(notice: OwnerPaidNotice): string {
-  const lines = [
+export function ownerPaidRfc822(notice: OwnerPaidNotice, messageId?: string): string {
+  // Subject is an application constant. Buyer fields belong only to the body.
+  return [
     `From: "RevealUI Studio" <${OWNER_NOTIFY_EMAIL}>`,
     `To: ${OWNER_NOTIFY_EMAIL}`,
     `Subject: ${notice.subject}`,
+    ...(messageId ? [`Message-ID: <${messageId}>`] : []),
     'MIME-Version: 1.0',
     'Content-Type: text/plain; charset=utf-8',
     '',
     notice.text,
-  ];
-  return lines.join('\r\n');
+  ].join('\r\n');
+}
+
+async function messageKey(bookingId: string): Promise<string> {
+  const digest = new Uint8Array(
+    await crypto.subtle.digest('SHA-256', new TextEncoder().encode(bookingId)),
+  );
+  return `consultation-${[...digest].map((b) => b.toString(16).padStart(2, '0')).join('')}@revealuistudio.com`;
 }
 
 function encodeRaw(message: string): string {
-  return base64Url(new TextEncoder().encode(message));
-}
-
-type PostResult = 'ok' | 'denied' | 'failed';
-
-async function postJson(
-  url: string,
-  token: string,
-  body: unknown,
-  fetchImpl: typeof fetch,
-): Promise<PostResult> {
-  const response = await providerFetch(
-    url,
-    {
-      method: 'POST',
-      headers: {
-        authorization: `Bearer ${token}`,
-        'content-type': 'application/json',
-      },
-      body: JSON.stringify(body),
-    },
-    fetchImpl,
-  );
-  if (response.ok) return 'ok';
-  if (response.status === 401 || response.status === 403) return 'denied';
-  return 'failed';
+  const bytes = new TextEncoder().encode(message);
+  let binary = '';
+  for (const byte of bytes) binary += String.fromCharCode(byte);
+  return btoa(binary).replaceAll('+', '-').replaceAll('/', '_').split('=')[0] ?? '';
 }
 
 export async function deliverOwnerPaidNotice(
   env: ConsultationEnv,
   notice: OwnerPaidNotice,
+  calendar: Pick<CalendarPort, 'get' | 'updateBooking'>,
   fetchImpl: typeof fetch = fetch,
-): Promise<OwnerMailDelivery> {
-  if (notice.to !== OWNER_NOTIFY_EMAIL) return 'failed';
-  if (!ownerMailConfigured(env)) return 'unconfigured';
-  const raw = encodeRaw(ownerPaidRfc822(notice));
-  try {
-    const token = await googleAccessToken(env, fetchImpl, GMAIL_SEND_SCOPE);
-    const sent = await postJson(SEND_URL, token, { raw }, fetchImpl);
-    if (sent === 'ok') return 'sent';
-  } catch {
-    // Send auth failed. A draft may still be possible.
+): Promise<string> {
+  if (notice.to !== OWNER_NOTIFY_EMAIL || !ownerMailConfigured(env))
+    throw new Error('owner-notice-unconfigured');
+  const booking = await calendar.get(notice.bookingId);
+  if (booking?.status !== 'paid_scheduled') throw new Error('owner-notice-booking');
+  if (booking.owner_notice?.messageId) return booking.owner_notice.messageId;
+  const token = await googleAccessToken(env, fetchImpl, GMAIL_SCOPE);
+  const key = await messageKey(notice.bookingId);
+  const request = async (path: string, method = 'GET', body?: unknown) => {
+    const response = await providerFetch(
+      `${GMAIL}${path}`,
+      {
+        method,
+        headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
+        ...(body ? { body: JSON.stringify(body) } : {}),
+      },
+      fetchImpl,
+    );
+    if (!response.ok) throw new Error('owner-notice-provider');
+    return response.status === 204 ? null : response.json();
+  };
+  const recordSent = async (messageId: string) => {
+    await calendar.updateBooking(notice.bookingId, (current) => ({
+      ...current,
+      owner_notice: { ...current.owner_notice, messageId },
+    }));
+    return messageId;
+  };
+  const findSent = async (): Promise<string | null> => {
+    const query = new URLSearchParams({ q: `in:sent rfc822msgid:${key}`, maxResults: '2' });
+    const found = z
+      .object({ messages: z.array(z.object({ id: z.string().min(1) })).optional() })
+      .parse(await request(`/messages?${query}`));
+    const message = found.messages?.[0];
+    if (!message) return null;
+    return recordSent(message.id);
+  };
+  const alreadySent = await findSent();
+  if (alreadySent) return alreadySent;
+  let draftId = booking.owner_notice?.draftId;
+  if (!draftId) {
+    const created = z.object({ id: z.string().min(1) }).parse(
+      await request('/drafts', 'POST', {
+        message: { raw: encodeRaw(ownerPaidRfc822(notice, key)) },
+      }),
+    );
+    const current = await calendar.updateBooking(notice.bookingId, (row) =>
+      row.owner_notice?.draftId || row.owner_notice?.messageId
+        ? row
+        : { ...row, owner_notice: { draftId: created.id } },
+    );
+    draftId = current.owner_notice?.draftId;
+    if (draftId !== created.id)
+      await request(`/drafts/${encodeURIComponent(created.id)}`, 'DELETE');
+    if (current.owner_notice?.messageId) return current.owner_notice.messageId;
   }
+  if (!draftId) throw new Error('owner-notice-draft');
   try {
-    const token = await googleAccessToken(env, fetchImpl, GMAIL_COMPOSE_SCOPE);
-    const drafted = await postJson(DRAFT_URL, token, { message: { raw } }, fetchImpl);
-    if (drafted === 'ok') return 'draft';
-  } catch {
-    // Both paths failed. The calendar event is already written.
+    // Gmail removes this draft when sent. A retry cannot send a new copy of it.
+    const sent = z
+      .object({ id: z.string().min(1) })
+      .parse(await request('/drafts/send', 'POST', { id: draftId }));
+    return recordSent(sent.id);
+  } catch (error) {
+    // A transport failure may have happened after Gmail sent it. Require provider proof.
+    const recovered = await findSent();
+    if (!recovered) throw error;
+    return recovered;
   }
-  console.error(`owner-notify failed booking=${notice.bookingId}`);
-  return 'failed';
 }

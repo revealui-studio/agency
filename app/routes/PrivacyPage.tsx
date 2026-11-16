@@ -1,7 +1,7 @@
 import { CONTACT_EMAIL } from '@/lib/site';
 
 export function PrivacyPage() {
-  const lastUpdated = 'September 30, 2026';
+  const lastUpdated = 'November 16, 2026';
   return (
     <section className="bg-background py-16 sm:py-24">
       <div className="mx-auto max-w-3xl px-6">
@@ -66,17 +66,16 @@ export function PrivacyPage() {
           <h3 className="mt-6 text-lg font-semibold text-foreground">Pageview analytics</h3>
           <p>
             After you accept optional cookies, the Site may load a self-hosted pageview tracker. It
-            records page views, the referring URL, and UTM campaign parameters. It is not used for
-            advertising and stays off until you accept.
+            records page views and referring paths without query strings or fragments. It is not
+            used for advertising and stays off until you accept.
           </p>
 
           <h3 className="mt-6 text-lg font-semibold text-foreground">Error telemetry</h3>
           <p>
             After you accept optional cookies, the Site may initialize error telemetry to diagnose
-            application errors. Tracing and a partial recording of the moments before a crash may
-            run only after you accept, and only in production. We do not record sessions
-            continuously or proactively. Error telemetry stays off until you accept, and stays
-            dormant when it is not configured.
+            application errors in production. Tracing and session replay are disabled. Request URLs
+            are stripped of query strings and fragments; request bodies and credentials are omitted.
+            Telemetry checks consent before sending, including after withdrawal.
           </p>
 
           <h3 className="mt-6 text-lg font-semibold text-foreground">What we do not collect</h3>
@@ -112,10 +111,9 @@ export function PrivacyPage() {
               consented analytics.
             </li>
             <li>
-              <strong>Error telemetry</strong>: consented application error tracking and
-              crash-replay diagnostics. Error data may include browser context, page URL, and a
-              partial session recording captured at the time of an error. No continuous session
-              recording is performed.
+              <strong>Error telemetry</strong>: consented application error tracking. Error data
+              includes error types and redacted stack traces. Session replay and tracing are
+              disabled.
             </li>
             <li>
               <strong>Email provider</strong>: email correspondence at our @revealui.com addresses.
@@ -190,8 +188,8 @@ export function PrivacyPage() {
           <p>
             The Site does not set advertising or marketing cookies. After you accept, performance
             telemetry may measure page loads, our self-hosted pageview tracker may record page
-            views, and error telemetry may collect crash diagnostics (including an on-error replay,
-            never a continuous recording). We do not use third-party ad trackers. If we introduce
+            views, and error telemetry may collect redacted crash diagnostics. You can change your
+            choice on the Cookie Policy page. We do not use third-party ad trackers. If we introduce
             non-essential cookies beyond these consented tools, we will update this policy and
             surface a consent control where required.
           </p>

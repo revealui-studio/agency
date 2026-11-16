@@ -59,7 +59,10 @@ describe('CookieConsent analytics gate', () => {
     await waitFor(() => {
       expect(umamiScripts()).toHaveLength(1);
     });
-    expect(initSentry).toHaveBeenCalledTimes(1);
+    await waitFor(() => expect(initSentry).toHaveBeenCalledTimes(1));
+    fireEvent(window, new Event('revealui-consent-preferences'));
+    fireEvent.click(screen.getByRole('button', { name: 'Reject all' }));
+    expect(screen.queryByTestId('speed-insights')).not.toBeInTheDocument();
   });
 
   it('publishes the banner height for the pay dock and clears it after a choice', () => {

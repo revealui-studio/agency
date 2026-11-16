@@ -4,7 +4,7 @@
  * Public copy must not describe a waiver.
  */
 
-import { CUSTOM_DOMAIN_CNAME_TARGET } from './share-stage-b';
+import { CUSTOM_DOMAIN_CNAME_TARGET } from './share-stage-b.ts';
 
 /** Public name for the $297 custom-domain line. SKU id stays stage-b. */
 export const DOMAIN_ADD_ON_LABEL = 'Domain add-on' as const;

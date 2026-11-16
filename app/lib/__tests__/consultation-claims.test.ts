@@ -79,7 +79,9 @@ describe('consultation public claims', () => {
     expect(CONSULTATION_SUCCESS).toBe(
       'Payment received. The Google Meet link is in your confirmation email and on the calendar invite.',
     );
-    expect(CONSULTATION_CANCEL).toBe('No charge. The hold ends within 20 minutes.');
+    expect(CONSULTATION_CANCEL).toBe(
+      'Checkout canceled. An unpaid reservation is released after Checkout expires.',
+    );
     for (const line of [
       STAGE_B_CHECKBOX,
       STAGE_B_HELPER,

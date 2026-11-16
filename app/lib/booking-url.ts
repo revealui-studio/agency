@@ -11,7 +11,7 @@ export function stripNetworkTokenFromUrl(raw: string): string {
     if (!url.searchParams.has('nw') && !url.searchParams.has('session_id')) return raw;
     url.searchParams.delete('nw');
     url.searchParams.delete('session_id');
-    return /^[a-z][a-z\d+.-]*:/iu.test(raw) ? url.href : `${url.pathname}${url.search}${url.hash}`;
+    return URL.canParse(raw) ? url.href : `${url.pathname}${url.search}${url.hash}`;
   } catch {
     return raw.split('?', 1)[0] ?? '';
   }

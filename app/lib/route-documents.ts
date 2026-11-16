@@ -8,24 +8,24 @@
  * The host serves 404.html for those requests.
  */
 
-import { BLOG_ENTRIES, type BlogEntry, docsBlogPath } from '../../content/blog/registry';
+import { BLOG_ENTRIES, type BlogEntry, docsBlogPath } from '../../content/blog/registry.ts';
 import {
   PROOF_GAP_DOCUMENT_TITLE,
   PROOF_GAP_META_DESCRIPTION,
   PROOF_GAP_PATH,
-} from '../content/proof-gap';
-import { publishedCases } from '../data/cases';
-import { publishedPress } from '../data/press';
-import { STUDIO_BLOG_HOME_H1, STUDIO_BLOG_HOME_SUB } from './blog-copy';
+} from '../content/proof-gap.ts';
+import { publishedCases } from '../data/cases/index.ts';
+import { publishedPress } from '../data/press/index.ts';
+import { STUDIO_BLOG_HOME_H1, STUDIO_BLOG_HOME_SUB } from './blog-copy.ts';
 import {
   CONSULTATION_BOOK_INTRO,
   CONSULTATION_CANCEL,
   CONSULTATION_SUCCESS,
   STAGE_B_ADDON,
-} from './consultation-buyer';
-import { DOMAIN_ADD_ON_LABEL } from './domain-pack';
-import { STAGE_B_PRICE } from './engagements';
-import { HOME_DOCUMENT_TITLE, HOME_META_DESCRIPTION } from './home-document';
+} from './consultation-buyer.ts';
+import { DOMAIN_ADD_ON_LABEL } from './domain-pack.ts';
+import { STAGE_B_PRICE } from './engagements.ts';
+import { HOME_DOCUMENT_TITLE, HOME_META_DESCRIPTION } from './home-document.ts';
 
 export const STUDIO_ORIGIN = 'https://revealuistudio.com';
 

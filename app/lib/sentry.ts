@@ -1,21 +1,6 @@
-/**
- * Sentry client init for the agency site (Vite + React).
- *
- * Mirrors the marketing-site pattern (`@sentry/react` + `VITE_SENTRY_DSN`)
- * and the agency Umami gate: the SDK stays dormant without a DSN, and
- * tracing / on-error replay stay at 0 until analytics consent is true
- * *and* the build is production. `replaysSessionSampleRate` stays 0 —
- * no proactive session recording.
- *
- * Build-time env (set on the Vercel project for `test` and production):
- *   VITE_SENTRY_DSN=<dsn from the agency Sentry project>
- *
- * Do not commit a real DSN. The init is a no-op when the variable is
- * absent so local and CI builds stay clean. Org/project live in Vercel.
- */
-
+/** Consent-gated error reporting. Booking pages never enable replay or tracing. */
 import * as Sentry from '@sentry/react';
-import { readConsent } from '@/lib/cookie-consent';
+import { analyticsAllowed, telemetryUrl } from './telemetry-privacy';
 
 export interface SentryInitEnv {
   readonly VITE_SENTRY_DSN?: string;
@@ -23,122 +8,94 @@ export interface SentryInitEnv {
   readonly PROD?: boolean;
 }
 
-const IGNORE_ERRORS: Array<string | RegExp> = [
-  // String substring matches — Sentry treats strings as substring includes.
-  'Non-Error promise rejection captured',
-  'NetworkError',
-  'Failed to fetch',
-  // REGEX-CONFIG-BOUNDARY: third-party-API regex string passed to Sentry SDK config.
-  // Filters out errors thrown from browser extensions, which we cannot fix.
-  /extensions\//i,
-];
-
 export function readSentryDsn(
   env: Pick<SentryInitEnv, 'VITE_SENTRY_DSN'> = import.meta.env,
 ): string | null {
-  const raw = typeof env.VITE_SENTRY_DSN === 'string' ? env.VITE_SENTRY_DSN.trim() : '';
-  return raw || null;
+  return env.VITE_SENTRY_DSN?.trim() || null;
 }
 
-export function hasAnalyticsConsent(): boolean {
-  return readConsent().consent.analytics === true;
+export const hasAnalyticsConsent = analyticsAllowed;
+
+export function sentrySampleRates(_consent: boolean, _prod: boolean) {
+  return { tracesSampleRate: 0, replaysSessionSampleRate: 0, replaysOnErrorSampleRate: 0 };
 }
 
-export function sentrySampleRates(
-  consent: boolean,
-  prod: boolean,
-): {
-  tracesSampleRate: number;
-  replaysSessionSampleRate: number;
-  replaysOnErrorSampleRate: number;
-} {
-  const consentedProd = consent && prod;
-  return {
-    tracesSampleRate: consentedProd ? 0.1 : 0,
-    replaysSessionSampleRate: 0,
-    replaysOnErrorSampleRate: consentedProd ? 1.0 : 0,
-  };
+function redactBreadcrumb(crumb: Sentry.Breadcrumb): Sentry.Breadcrumb | null {
+  if (!analyticsAllowed()) return null;
+  if (!['fetch', 'xhr', 'navigation'].includes(crumb.category ?? '')) return null;
+  const data: Record<string, string | number> = {};
+  for (const key of ['url', 'from', 'to']) {
+    const value: unknown = crumb.data?.[key];
+    if (typeof value === 'string') data[key] = telemetryUrl(value);
+  }
+  const status: unknown = crumb.data?.status_code;
+  if (typeof status === 'number') data.status_code = status;
+  return { category: crumb.category, timestamp: crumb.timestamp, level: crumb.level, data };
 }
 
 function redactEvent(event: Sentry.ErrorEvent): Sentry.ErrorEvent {
-  const request = event.request;
-  if (request) {
-    if (request.cookies) {
-      request.cookies = undefined;
-    }
-    if (request.headers) {
-      const redacted: Record<string, string> = {};
-      for (const [key, value] of Object.entries(request.headers)) {
-        if (key.toLowerCase() === 'authorization') {
-          redacted[key] = '[REDACTED]';
-        } else {
-          redacted[key] = value as string;
-        }
-      }
-      request.headers = redacted;
+  if (event.request) {
+    event.request = {
+      url: event.request.url ? telemetryUrl(event.request.url) : undefined,
+      method: event.request.method,
+    };
+  }
+  event.breadcrumbs = event.breadcrumbs?.flatMap((crumb) => {
+    const safe = redactBreadcrumb(crumb);
+    return safe ? [safe] : [];
+  });
+  // Free-form messages, user data and application context can contain capabilities or form data.
+  event.message = undefined;
+  event.user = undefined;
+  event.extra = undefined;
+  event.contexts = undefined;
+  for (const exception of event.exception?.values ?? []) {
+    exception.value = undefined;
+    for (const frame of exception.stacktrace?.frames ?? []) {
+      if (frame.filename) frame.filename = telemetryUrl(frame.filename);
+      if (frame.abs_path) frame.abs_path = telemetryUrl(frame.abs_path);
+      frame.vars = undefined;
     }
   }
   return event;
 }
 
-/**
- * Initialise the browser SDK. No-op without a DSN. No-op without analytics
- * consent (same gate as Umami / Speed Insights). Returns whether `Sentry.init`
- * ran on this call.
- */
 export function initSentry(env: SentryInitEnv = import.meta.env): boolean {
   const dsn = readSentryDsn(env);
-  if (!dsn) {
-    return false;
-  }
-  const consent = hasAnalyticsConsent();
-  if (!consent) {
-    return false;
-  }
-  if (Sentry.getClient()) {
-    return false;
-  }
-
+  if (!dsn || !analyticsAllowed() || Sentry.getClient()) return false;
   const prod = env.PROD === true;
-  const rates = sentrySampleRates(consent, prod);
-  const integrations =
-    prod && typeof Sentry.browserTracingIntegration === 'function'
-      ? [
-          Sentry.browserTracingIntegration(),
-          Sentry.replayIntegration({
-            maskAllText: true,
-            blockAllMedia: true,
-          }),
-        ]
-      : [];
-
   Sentry.init({
     dsn,
     environment: env.MODE ?? 'development',
-    ...rates,
-    integrations,
-    ignoreErrors: IGNORE_ERRORS,
-    beforeSend(event) {
-      if (!prod) {
-        return null;
-      }
-      return redactEvent(event);
+    ...sentrySampleRates(true, prod),
+    defaultIntegrations: false,
+    integrations: [],
+    sendClientReports: false,
+    transport(options) {
+      const transport = Sentry.makeFetchTransport(options);
+      return {
+        ...transport,
+        send(envelope) {
+          return analyticsAllowed()
+            ? transport.send(envelope)
+            : Promise.resolve({ statusCode: 200 });
+        },
+      };
     },
+    sendDefaultPii: false,
+    beforeBreadcrumb: redactBreadcrumb,
+    beforeSend(event) {
+      return prod && analyticsAllowed() ? redactEvent(event) : null;
+    },
+    beforeSendTransaction: () => null,
   });
   return true;
 }
 
-/**
- * Reports a render error to Sentry if the SDK was initialised. No-op otherwise.
- */
 export function captureRenderError(error: Error, info: { componentStack?: string | null }): void {
-  if (!readSentryDsn() || !Sentry.getClient()) {
-    return;
-  }
+  if (!readSentryDsn() || !analyticsAllowed() || !Sentry.getClient()) return;
   Sentry.withScope((scope) => {
-    if (info.componentStack) {
-      scope.setExtra('componentStack', info.componentStack);
-    }
+    if (info.componentStack) scope.setExtra('componentStack', info.componentStack);
     Sentry.captureException(error);
   });
 }

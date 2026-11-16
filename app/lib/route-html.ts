@@ -10,7 +10,7 @@ import {
   htmlRelativePath,
   prerenderHeads,
   type StudioHead,
-} from './route-documents';
+} from './route-documents.ts';
 
 export function escapeHtmlText(value: string): string {
   return value.replaceAll('&', '&amp;').replaceAll('<', '&lt;');
