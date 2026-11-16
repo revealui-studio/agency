@@ -701,6 +701,7 @@ describe('consultation http', () => {
     expect(claim?.stripeSessionId).toBe('cs_test_1');
     expect(claim?.bookingId).toBe(saved.booking_id);
     expect(claim?.expiresAt).toBe(new Date(NOW.getTime() + 72 * 60 * 60 * 1000).toISOString());
+    expect(claim?.sessionExpiresAt).toBe(new Date(NOW.getTime() + 40 * 60 * 1000).toISOString());
 
     const again = await handleConsultationRequest(
       request('/api/consultation/book', buyer({ network_token: token })),
@@ -711,6 +712,12 @@ describe('consultation http', () => {
       booking_id: saved.booking_id,
       checkout_url: 'https://checkout.stripe.com/c/pay/cs_test_1',
     });
+    expect(checkouts).toHaveLength(1);
+    const expired = await handleConsultationRequest(
+      request('/api/consultation/book', buyer({ network_token: token })),
+      { ...deps, now: () => new Date(NOW.getTime() + 41 * 60 * 1000) },
+    );
+    expect(expired.status).toBe(409);
     expect(checkouts).toHaveLength(1);
   });
 

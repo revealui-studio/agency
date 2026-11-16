@@ -55,6 +55,7 @@ export async function checkoutCanRelease(
         ),
       ),
     );
+    if (sessions[0]?.id !== booking.stripe_session_id) throw new Error('checkout-binding');
   } else {
     // No marker means a pre-migration hold, whose original session was not persisted.
     const created = booking.checkout_started_at
@@ -107,6 +108,7 @@ export async function checkoutCanRelease(
       continue;
     }
     if (session.status === 'open') {
+      const sessionId = session.id;
       session = sessionSchema.parse(
         await stripeRequest(
           secret,
@@ -115,6 +117,7 @@ export async function checkoutCanRelease(
           { method: 'POST' },
         ),
       );
+      if (session.id !== sessionId) throw new Error('checkout-binding');
     }
     if (
       !bound(session, booking.booking_id) ||

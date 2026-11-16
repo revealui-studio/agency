@@ -165,4 +165,53 @@ describe('reservation lifecycle', () => {
     await refundUnavailableReservation(hold.booking_id, session.id, 'synthetic', fetchImpl);
     expect(keys).toEqual(['consultation-unavailable:cs_test', 'consultation-unavailable:cs_test']);
   });
+  it('retains a hold when Stripe returns a different session during retrieval or expiry', async () => {
+    const bound = { ...hold, stripe_session_id: session.id };
+    for (const mismatchOn of ['read', 'expire']) {
+      await expect(
+        checkoutCanRelease(bound, later, 'synthetic', async (input) => {
+          const expiring = String(input).endsWith('/expire');
+          return Response.json({
+            ...session,
+            id: (mismatchOn === 'expire') === expiring ? 'cs_other' : session.id,
+            status: expiring ? 'expired' : 'open',
+          });
+        }),
+      ).rejects.toThrow('checkout-binding');
+    }
+  });
+
+  it('recovers durable compensation evidence instead of refunding again on a late replay', async () => {
+    for (const status of ['succeeded', 'pending']) {
+      const methods: string[] = [];
+      const fetchImpl: typeof fetch = async (input, init) => {
+        methods.push(init?.method ?? 'GET');
+        if (String(input).includes('/checkout/'))
+          return Response.json({ ...session, status: 'complete', payment_status: 'paid' });
+        return Response.json({
+          has_more: false,
+          data: [
+            {
+              id: 're_previous',
+              status,
+              metadata: {
+                booking_id: hold.booking_id,
+                checkout_session: session.id,
+                reason: 'reservation_unavailable',
+              },
+            },
+          ],
+        });
+      };
+      const replay = refundUnavailableReservation(
+        hold.booking_id,
+        session.id,
+        'synthetic',
+        fetchImpl,
+      );
+      if (status === 'succeeded') await expect(replay).resolves.toBe('re_previous');
+      else await expect(replay).rejects.toThrow('refund-pending');
+      expect(methods).toEqual(['GET', 'GET']);
+    }
+  });
 });

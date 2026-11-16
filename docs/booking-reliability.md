@@ -2,7 +2,7 @@
 
 Calendar extended properties remain the booking ledger; Stripe remains the payment and refund ledger. Gmail drafts own owner-notice delivery. This extends the existing owners without introducing a process-local fulfillment store.
 
-- Checkout has a fixed 40-minute expiry (above Stripe's 30-minute minimum), with recovery disabled. The create attempt is persisted before contacting Stripe, and creation has a booking-specific idempotency key. The returned session is bound before the URL is exposed.
+- Checkout has a fixed 40-minute expiry (above Stripe's 30-minute minimum), with recovery disabled. The create attempt is persisted before contacting Stripe, and creation has a booking-specific idempotency key. The returned session is bound before the URL is exposed. Network retries reuse its actual expiry and retain a stable booking ID across ambiguous creates; an expired session is never offered as an open Checkout.
 - Expiry alone cannot release a reservation. Stripe must confirm every bound or recovered Checkout is expired and unpaid. A timed-out create is recovered by a complete paginated listing; provider errors, incomplete pages, and pending payments retain the reservation. Pre-migration holds use the same provider check.
 - Calendar changes use ETags. A stale deletion cannot remove a newly paid booking. A stale payment cannot recreate a removed event. A conflicting paid session cannot replace the original session.
 - Delayed paid webhooks can finalize a retained reservation. An unavailable reservation produces a provider-persisted refund with a stable idempotency key. Pending compensation returns a retryable response.

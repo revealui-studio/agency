@@ -220,6 +220,17 @@ async function book(
     }
     if (reserved.outcome === 'rejected') return redeemed();
     if (reserved.outcome === 'reuse') {
+      try {
+        const existing = await calendar.get(reserved.bookingId);
+        if (
+          existing?.status !== 'slot_held' ||
+          !(Date.parse(existing.expires_at) > now.getTime()) ||
+          (existing.stripe_session_id && existing.stripe_session_id !== reserved.stripeSessionId)
+        )
+          return redeemed();
+      } catch {
+        return json(502, { error: 'calendar' });
+      }
       return json(200, {
         booking_id: reserved.bookingId,
         checkout_url: reserved.checkoutUrl,
@@ -253,6 +264,7 @@ async function book(
         stripeSessionId: booked.value.stripeSessionId,
         checkoutUrl: booked.value.checkoutUrl,
         bookingId: booked.value.bookingId,
+        checkoutExpiresAt: new Date(booked.value.booking.expires_at),
       });
       if (recorded === 'rejected') return redeemed();
     } catch {

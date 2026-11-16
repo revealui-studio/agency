@@ -15,8 +15,8 @@
  *    the booking id, when the session stops counting as open, and expires_at
  *    copied from the token.
  * 4. While that session is open, the same jti and the same email receive that
- *    same session again. A Checkout Session counts as open for 24 hours after
- *    creation, or until the token expires, whichever is sooner.
+ *    same session again until the persisted Checkout expiry or token expiry,
+ *    whichever is sooner.
  * 5. Any other second redemption is rejected. The claim still blocks a new
  *    session until the token expiry.
  * 6. If Checkout creation fails before a session exists, release the
@@ -74,6 +74,7 @@ export interface CommitInput {
   readonly stripeSessionId: string;
   readonly checkoutUrl: string;
   readonly bookingId: string;
+  readonly checkoutExpiresAt: Date;
 }
 
 export type ReserveResult =
@@ -194,8 +195,10 @@ export function nextClaimOnCommit(
     }
     return 'reject';
   }
+  const checkoutExpiry = input.checkoutExpiresAt.getTime();
+  if (!Number.isFinite(checkoutExpiry) || checkoutExpiry <= now) return 'reject';
   const sessionExpiresAt = new Date(
-    Math.min(expiresAt, now + NETWORK_CHECKOUT_SESSION_MAX_MS),
+    Math.min(expiresAt, checkoutExpiry, now + NETWORK_CHECKOUT_SESSION_MAX_MS),
   ).toISOString();
   return {
     ...existing,
