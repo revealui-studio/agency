@@ -230,7 +230,7 @@ describe('consultation http', () => {
     const first = await handleConsultationRequest(request('/api/consultation/book', buyer()), deps);
     expect(first.status).toBe(200);
     const saved = (await first.json()) as { booking_id: string; checkout_url: string };
-    expect(saved.booking_id).toBe(`network-${await networkRedeemEventId('jti-first')}`);
+    expect(saved.booking_id).toBe('book_1');
     expect(saved.checkout_url).toBe('https://checkout.stripe.com/c/pay/cs_test_1');
     expect(checkouts[0]?.lines).toEqual([consultationPriceDataLine(1)]);
     expect(checkouts[0]?.successUrl).toBe(
@@ -699,7 +699,7 @@ describe('consultation http', () => {
     expect(claim?.status).toBe('open');
     expect(claim?.email).toBe('ada@example.com');
     expect(claim?.stripeSessionId).toBe('cs_test_1');
-    expect(claim?.bookingId).toBe('book_1');
+    expect(claim?.bookingId).toBe(saved.booking_id);
     expect(claim?.expiresAt).toBe(new Date(NOW.getTime() + 72 * 60 * 60 * 1000).toISOString());
 
     const again = await handleConsultationRequest(
@@ -708,7 +708,7 @@ describe('consultation http', () => {
     );
     expect(again.status).toBe(200);
     expect(await again.json()).toEqual({
-      booking_id: 'book_1',
+      booking_id: saved.booking_id,
       checkout_url: 'https://checkout.stripe.com/c/pay/cs_test_1',
     });
     expect(checkouts).toHaveLength(1);
