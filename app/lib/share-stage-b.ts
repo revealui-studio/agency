@@ -4,7 +4,7 @@
  * not query DNS, call Vercel, or edit registrar records.
  */
 
-import { clientSlugFromHost, STUDIO_APEX_HOST } from './share-host';
+import { clientSlugFromHost, STUDIO_APEX_HOST } from './share-host.ts';
 
 export const CUSTOM_DOMAIN_CNAME_TARGET = 'cname.vercel-dns.com' as const;
 

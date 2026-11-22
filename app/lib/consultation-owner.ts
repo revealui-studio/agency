@@ -6,15 +6,15 @@
  * Do not add a tagline, a second logo, or site nav.
  */
 
-import type { Booking } from './consultation-booking';
+import type { Booking } from './consultation-booking.ts';
 import {
   consultationBookDueCents,
   consultationRateLine,
   consultationWhenLine,
-} from './consultation-buyer';
-import { DOMAIN_ADD_ON_LABEL } from './domain-pack';
-import { formatUsdFromCents } from './money';
-import { CONTACT_EMAIL } from './site';
+} from './consultation-buyer.ts';
+import { DOMAIN_ADD_ON_LABEL } from './domain-pack.ts';
+import { formatUsdFromCents } from './money.ts';
+import { CONTACT_EMAIL } from './site.ts';
 
 export const OWNER_NOTIFY_EMAIL = CONTACT_EMAIL;
 

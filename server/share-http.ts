@@ -1,21 +1,21 @@
-import { consultationDueCents } from '../app/lib/consultation-hours';
-import { clientSlugFromHost, isConsultationDomainHost } from '../app/lib/share-host';
+import { consultationDueCents } from '../app/lib/consultation-hours.ts';
+import { clientSlugFromHost, isConsultationDomainHost } from '../app/lib/share-host.ts';
 import {
   buildStageBInvoice,
   InvoiceRejected,
   type StageBInvoice,
-} from '../app/lib/stage-b-invoice';
-import { type AuditEvent, type AuditLog, createAuditLog } from './audit-log';
-import { calendarFromEnv, consultationEnvFromProcess } from './consultation-calendar';
+} from '../app/lib/stage-b-invoice.ts';
+import { type AuditEvent, type AuditLog, createAuditLog } from './audit-log.ts';
+import { calendarFromEnv, consultationEnvFromProcess } from './consultation-calendar.ts';
 import {
   consultationSiteFromHost,
   type FulfillmentConfig,
   type FulfillmentDeps,
   FulfillmentError,
   fulfillConsultation,
-} from './consultation-fulfillment';
-import { bearerMatchesSecret, type SessionEnv, verifySession } from './session';
-import { readShareSeed, SHARE_SEED_FILES } from './share-seed';
+} from './consultation-fulfillment.ts';
+import { bearerMatchesSecret, type SessionEnv, verifySession } from './session.ts';
+import { readShareSeed, SHARE_SEED_FILES } from './share-seed.ts';
 
 const processAudit = createAuditLog();
 

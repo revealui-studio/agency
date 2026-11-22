@@ -1,10 +1,10 @@
-import { BLOG_ENTRIES, type BlogEntry } from '../../content/blog/registry';
+import { BLOG_ENTRIES, type BlogEntry } from '../../content/blog/registry.ts';
 import {
   STUDIO_BLOG_FEED_PATH,
   STUDIO_BLOG_FEED_TITLE,
   STUDIO_BLOG_FEED_TYPE,
   STUDIO_BLOG_HOME_SUB,
-} from './blog-copy';
+} from './blog-copy.ts';
 
 /** Public Studio origin. Item links and the channel self link use this host only. */
 export const STUDIO_ORIGIN = 'https://revealuistudio.com';

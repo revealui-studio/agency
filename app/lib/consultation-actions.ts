@@ -21,15 +21,16 @@ import {
   type ConsultationChangeRequest,
   createHold,
   deskScheduleTransition,
-} from './consultation-booking';
+  ReservationUnavailableError,
+} from './consultation-booking.ts';
 import {
   CheckoutDiscountError,
   type CheckoutLine,
   consultationCheckoutLines,
-} from './consultation-checkout';
-import { buildOwnerPaidNotice, type OwnerPaidNotice } from './consultation-owner';
-import { generateConsultationSlots, type TimeInterval } from './consultation-slots';
-import { DOMAIN_ADD_ON_LABEL } from './domain-pack';
+} from './consultation-checkout.ts';
+import { buildOwnerPaidNotice, type OwnerPaidNotice } from './consultation-owner.ts';
+import { generateConsultationSlots, type TimeInterval } from './consultation-slots.ts';
+import { DOMAIN_ADD_ON_LABEL } from './domain-pack.ts';
 
 export type HumanGate = 'none' | 'draft_only' | 'owner_send' | 'owner_secrets';
 
@@ -58,7 +59,8 @@ export type ActionError =
   | 'network-coupon-unconfigured'
   | 'payment-required'
   | 'booking-missing'
-  | 'not-scheduled';
+  | 'not-scheduled'
+  | 'owner-notice';
 
 export type ActionResult<T> =
   | { readonly ok: true; readonly value: T }
@@ -77,7 +79,8 @@ export interface ActionCalendar {
   putHold(booking: Booking, now: Date): Promise<Booking>;
   release(bookingId: string): Promise<void>;
   get(bookingId: string): Promise<Booking | null>;
-  schedulePaid(booking: Booking, stripeSessionId: string): Promise<SchedulePaidResult>;
+  schedulePaid(booking: Booking, stripeSessionId: string, now?: Date): Promise<SchedulePaidResult>;
+  updateBooking(bookingId: string, update: (booking: Booking) => Booking): Promise<Booking>;
 }
 
 export interface ActionStripe {
@@ -100,7 +103,7 @@ export interface ConsultationActionDeps {
   readonly stageBNetworkCouponId?: string;
   readonly onConfirmation?: (email: ConfirmationEmail) => void;
   /** Founder notice. Production wires Gmail. Tests pass a fake sink. */
-  readonly onOwnerPaid?: (notice: OwnerPaidNotice) => void | Promise<void>;
+  readonly onOwnerPaid?: (notice: OwnerPaidNotice) => string | Promise<string>;
 }
 
 export interface ConsultationAction<TInput, TValue> {
@@ -215,6 +218,29 @@ const saveSlot: ConsultationAction<SaveSlotInput, SaveSlotValue> = {
     return input.bookingId;
   },
   async run(input, deps) {
+    let previous: Booking | null;
+    try {
+      previous = await deps.calendar.get(input.bookingId);
+    } catch {
+      return fail('calendar');
+    }
+    if (previous) {
+      const expected = createHold(input.input, deps.now, input.bookingId);
+      const fields = [
+        'start',
+        'end',
+        'hours',
+        'email',
+        'name',
+        'company',
+        'stage_b',
+        'stage_b_fee',
+        'network_jti',
+      ] as const;
+      if (previous.status !== 'slot_held' || fields.some((key) => previous[key] !== expected[key]))
+        return fail('slot-taken');
+      return { ok: true, value: { booking: previous } };
+    }
     const windowFrom = new Date(Date.parse(input.input.start) - DAY_MS);
     const windowTo = new Date(Date.parse(input.input.end) + DAY_MS);
     let open = false;
@@ -303,13 +329,29 @@ const createCheckoutSession: ConsultationAction<CreateCheckoutInput, CheckoutSes
     }
 
     try {
+      const pending = await deps.calendar.updateBooking(stored.booking_id, (current) => {
+        if (
+          current.status !== 'slot_held' ||
+          Date.parse(current.expires_at) - deps.now.getTime() < 31 * 60 * 1000
+        )
+          throw new ReservationUnavailableError();
+        return {
+          ...current,
+          checkout_started_at: current.checkout_started_at ?? deps.now.toISOString(),
+        };
+      });
       const session = await deps.stripe.createCheckout({
-        booking: stored,
+        booking: pending,
         lines,
         successUrl: `${deps.origin}/consultation/book/success?booking=${encodeURIComponent(stored.booking_id)}&session_id={CHECKOUT_SESSION_ID}`,
         cancelUrl: `${deps.origin}/consultation/book/cancel`,
         stageBNetworkCouponId:
           stored.stage_b_fee === 'waived_network' ? deps.stageBNetworkCouponId : undefined,
+      });
+      const bound = await deps.calendar.updateBooking(stored.booking_id, (current) => {
+        if (current.stripe_session_id && current.stripe_session_id !== session.id)
+          throw new ReservationUnavailableError();
+        return { ...current, stripe_session_id: session.id };
       });
       return {
         ok: true,
@@ -317,7 +359,7 @@ const createCheckoutSession: ConsultationAction<CreateCheckoutInput, CheckoutSes
           checkoutUrl: session.url,
           stripeSessionId: session.id,
           lines,
-          booking: stored,
+          booking: bound,
         },
       };
     } catch (error) {
@@ -343,27 +385,11 @@ const writeCalendarMeetOnPay: ConsultationAction<PaidMeetInput, PaidMeetValue> =
     if (input.paymentStatus !== 'paid') return fail('payment-required');
     if (!bookingIdOf(input.metadata, input.booking)) return fail('booking-missing');
 
-    if (input.booking?.status === 'paid_scheduled') {
-      return {
-        ok: true,
-        value: {
-          action: 'already_scheduled',
-          booking: input.booking,
-          desk: deskScheduleTransition(input.booking).reason,
-        },
-      };
-    }
-
     const booking = input.booking;
     if (!booking) return fail('hold-missing');
-    if (
-      !Number.isFinite(Date.parse(booking.expires_at)) ||
-      Date.parse(booking.expires_at) <= deps.now.getTime()
-    )
-      return fail('hold-expired');
 
     try {
-      const scheduled = await deps.calendar.schedulePaid(booking, input.sessionId);
+      const scheduled = await deps.calendar.schedulePaid(booking, input.sessionId, deps.now);
       return {
         ok: true,
         value: {
@@ -372,8 +398,8 @@ const writeCalendarMeetOnPay: ConsultationAction<PaidMeetInput, PaidMeetValue> =
           desk: deskScheduleTransition(scheduled.booking).reason,
         },
       };
-    } catch {
-      return fail('calendar');
+    } catch (error) {
+      return fail(error instanceof ReservationUnavailableError ? 'hold-missing' : 'calendar');
     }
   },
 };
@@ -391,16 +417,20 @@ const notifyOwnerPaid: ConsultationAction<NotifyOwnerInput, NotifyOwnerValue> = 
   async run(input, deps) {
     if (input.booking.status !== 'paid_scheduled') return fail('not-scheduled');
     const notice = buildOwnerPaidNotice(input.booking, input.amountTotal);
-    let invoked = false;
+    const current = await deps.calendar.get(input.booking.booking_id);
+    if (current?.owner_notice?.messageId) return { ok: true, value: { notice, invoked: false } };
+    if (!deps.onOwnerPaid) return fail('owner-notice');
     try {
-      if (deps.onOwnerPaid) {
-        invoked = true;
-        await deps.onOwnerPaid(notice);
-      }
+      const messageId = await deps.onOwnerPaid(notice);
+      if (!messageId) return fail('owner-notice');
+      await deps.calendar.updateBooking(input.booking.booking_id, (booking) => ({
+        ...booking,
+        owner_notice: { ...booking.owner_notice, messageId },
+      }));
+      return { ok: true, value: { notice, invoked: true } };
     } catch {
-      // The calendar event already exists. An owner-mail failure must not roll it back.
+      return fail('owner-notice');
     }
-    return { ok: true, value: { notice, invoked } };
   },
 };
 
@@ -505,35 +535,23 @@ export async function runPaidConsultation(
 ): Promise<ActionResult<PaidConsultationValue>> {
   const wrote = await consultationActions.write_calendar_meet_on_pay.run(input, deps);
   if (!wrote.ok) return wrote;
-  if (wrote.value.action !== 'scheduled') {
-    return {
-      ok: true,
-      value: {
-        status: 'paid_scheduled',
-        action: wrote.value.action,
-        booking: wrote.value.booking,
-        desk: wrote.value.desk,
-        confirm: null,
-        owner: null,
-      },
-    };
-  }
   const owner = await consultationActions.notify_owner_paid.run(
     { booking: wrote.value.booking, amountTotal: input.amountTotal ?? null },
     deps,
   );
-  const draft = await consultationActions.send_confirm_email.run(
-    { booking: wrote.value.booking },
-    deps,
-  );
+  if (!owner.ok) return owner;
+  const draft =
+    wrote.value.action === 'scheduled'
+      ? await consultationActions.send_confirm_email.run({ booking: wrote.value.booking }, deps)
+      : null;
   return {
     ok: true,
     value: {
       status: 'paid_scheduled',
-      action: 'scheduled',
+      action: wrote.value.action,
       booking: wrote.value.booking,
       desk: wrote.value.desk,
-      confirm: draft.ok ? draft.value : null,
+      confirm: draft?.ok ? draft.value : null,
       owner: owner.ok ? owner.value : null,
     },
   };

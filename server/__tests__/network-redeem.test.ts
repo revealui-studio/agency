@@ -6,7 +6,6 @@ import { NETWORK_LINK_USED } from '../../app/lib/consultation-buyer';
 import {
   createGoogleNetworkLedger,
   createMemoryNetworkLedger,
-  NETWORK_CHECKOUT_SESSION_MAX_MS,
   NETWORK_CLAIM_LEASE_MS,
   networkRedeemEventId,
   nextClaimOnCommit,
@@ -15,6 +14,7 @@ import {
 } from '../network-redeem';
 
 const NOW = new Date('2026-01-06T15:00:00.000Z');
+const CHECKOUT_EXPIRES = new Date(NOW.getTime() + 40 * 60 * 1000);
 const EXPIRES = new Date(NOW.getTime() + 72 * 60 * 60 * 1000);
 
 function reserveInput(extra: Partial<ReserveInput> = {}): ReserveInput {
@@ -34,6 +34,7 @@ describe('network redeem ledger', () => {
     expect(reserved).toEqual({ outcome: 'reserved' });
     const committed = await ledger.commit({
       ...reserveInput(),
+      checkoutExpiresAt: CHECKOUT_EXPIRES,
       stripeSessionId: 'cs_test_1',
       checkoutUrl: 'https://checkout.stripe.com/c/pay/cs_test_1',
       bookingId: 'book_1',
@@ -45,7 +46,7 @@ describe('network redeem ledger', () => {
     expect(claim?.stripeSessionId).toBe('cs_test_1');
     expect(claim?.expiresAt).toBe(EXPIRES.toISOString());
     const openFor = Date.parse(claim?.sessionExpiresAt ?? '') - NOW.getTime();
-    expect(openFor).toBe(NETWORK_CHECKOUT_SESSION_MAX_MS);
+    expect(openFor).toBe(CHECKOUT_EXPIRES.getTime() - NOW.getTime());
   });
 
   it('reuses the same open session and rejects a second one', async () => {
@@ -53,12 +54,14 @@ describe('network redeem ledger', () => {
     await ledger.reserve(reserveInput());
     await ledger.commit({
       ...reserveInput(),
+      checkoutExpiresAt: CHECKOUT_EXPIRES,
       stripeSessionId: 'cs_test_1',
       checkoutUrl: 'https://checkout.stripe.com/c/pay/cs_test_1',
       bookingId: 'book_1',
     });
     const again = await ledger.commit({
       ...reserveInput(),
+      checkoutExpiresAt: CHECKOUT_EXPIRES,
       stripeSessionId: 'cs_test_1',
       checkoutUrl: 'https://checkout.stripe.com/c/pay/cs_test_1',
       bookingId: 'book_1',
@@ -73,6 +76,7 @@ describe('network redeem ledger', () => {
     });
     const otherSession = await ledger.commit({
       ...reserveInput(),
+      checkoutExpiresAt: CHECKOUT_EXPIRES,
       stripeSessionId: 'cs_test_other',
       checkoutUrl: 'https://checkout.stripe.com/c/pay/cs_test_other',
       bookingId: 'book_2',
@@ -88,11 +92,12 @@ describe('network redeem ledger', () => {
     await ledger.reserve(reserveInput());
     await ledger.commit({
       ...reserveInput(),
+      checkoutExpiresAt: CHECKOUT_EXPIRES,
       stripeSessionId: 'cs_test_1',
       checkoutUrl: 'https://checkout.stripe.com/c/pay/cs_test_1',
       bookingId: 'book_1',
     });
-    const later = new Date(NOW.getTime() + NETWORK_CHECKOUT_SESSION_MAX_MS + 1000);
+    const later = new Date(CHECKOUT_EXPIRES.getTime() + 1000);
     const closed = await ledger.reserve(reserveInput({ now: later }));
     expect(closed).toEqual({ outcome: 'rejected' });
     expect((await ledger.get('jti-ledger'))?.status).toBe('open');
@@ -149,6 +154,7 @@ describe('network redeem ledger', () => {
         },
         {
           ...reserveInput({ jti: 'jti-old' }),
+          checkoutExpiresAt: CHECKOUT_EXPIRES,
           stripeSessionId: 'cs_test_2',
           checkoutUrl: 'https://checkout.stripe.com/c/pay/cs_test_2',
           bookingId: 'book_2',
@@ -257,6 +263,7 @@ describe('calendar redemption rows', () => {
 
     const committed = await ledger.commit({
       ...reserveInput({ jti: 'jti-google' }),
+      checkoutExpiresAt: CHECKOUT_EXPIRES,
       stripeSessionId: 'cs_test_1',
       checkoutUrl: 'https://checkout.stripe.com/c/pay/cs_test_1',
       bookingId: 'book_1',

@@ -9,7 +9,7 @@ export const CONSULTATION_TZ = 'America/New_York' as const;
 export const SLOT_STEP_MINUTES = 60 as const;
 export const DAY_START_MINUTES = 9 * 60;
 export const DAY_END_MINUTES = 17 * 60;
-export const HOLD_TTL_MS = 20 * 60 * 1000;
+export const HOLD_TTL_MS = 40 * 60 * 1000;
 export const MAX_SLOT_WINDOW_MS = 62 * 24 * 60 * 60 * 1000;
 
 const WEEKDAYS = new Set(['Mon', 'Tue', 'Wed', 'Thu', 'Fri']);

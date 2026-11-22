@@ -7,17 +7,17 @@
  * The Stripe SKU stays stage-b. The buyer invite is the calendar event.
  */
 
-import { consultationDueCents, consultationHourCount } from './consultation-hours';
-import { formatConsultationRange } from './consultation-slots';
-import { DOMAIN_ADD_ON_LABEL } from './domain-pack';
+import { consultationDueCents, consultationHourCount } from './consultation-hours.ts';
+import { formatConsultationRange } from './consultation-slots.ts';
+import { DOMAIN_ADD_ON_LABEL } from './domain-pack.ts';
 import {
   CONSULTATION_DELIVERABLE,
   CONSULTATION_PRICE,
   DOMAIN_ADD_ON_LINE_ITEM,
   STAGE_B_CENTS,
   STAGE_B_PRICE,
-} from './engagements';
-import { CONTACT_EMAIL } from './site';
+} from './engagements.ts';
+import { CONTACT_EMAIL } from './site.ts';
 
 export const CONSULTATION_BOOK_INTRO =
   'Weekday slots in Eastern Time, 9:00 AM to 5:00 PM. $300 per hour. The 30-minute intro stays a separate booking.';
@@ -36,7 +36,8 @@ export const STAGE_B_ON_ORDER = `${DOMAIN_ADD_ON_LABEL} is on this order.`;
 export const STAGE_B_DETAIL =
   'Optional. Your share opens on a domain you already own, with the path note, proof-gap map, stack sketch, onboarding page, and a short walkthrough. We attach the DNS.';
 
-export const CONSULTATION_HOLD_NOTE = 'Continuing to payment holds the slot for 20 minutes.';
+export const CONSULTATION_HOLD_NOTE =
+  'Checkout is available for up to 40 minutes. Your slot stays reserved while payment is processing.';
 
 /** Second use of a network Consultation link after a Checkout Session exists. */
 export const NETWORK_LINK_USED = 'This network Consultation link has already been used.';
@@ -52,7 +53,8 @@ export const CONSULTATION_MEET_FALLBACK = 'The Google Meet link is on the calend
 export const CONSULTATION_PREP_BODY =
   'Send the system you want to look at and the question you want answered. A link is usually enough.';
 
-export const CONSULTATION_CANCEL = 'No charge. The hold ends within 20 minutes.';
+export const CONSULTATION_CANCEL =
+  'Checkout canceled. An unpaid reservation is released after Checkout expires.';
 
 export const CONSULTATION_CHANGE_POLICY = [
   'At least 24 hours before the scheduled start: choose a full refund of Consultation time or a free reschedule.',

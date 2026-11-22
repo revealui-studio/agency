@@ -239,11 +239,12 @@ describe('consultation http throttle', () => {
         },
         release: (bookingId) => calendar.release(bookingId),
         get: (bookingId) => calendar.get(bookingId),
+        updateBooking: calendar.updateBooking,
         recordRefund: (bookingId, stripeSessionId, evidence) =>
           calendar.recordRefund(bookingId, stripeSessionId, evidence),
         resolveDomainPackRefund: (bookingId, chargeId, amountRefunded, decision) =>
           calendar.resolveDomainPackRefund(bookingId, chargeId, amountRefunded, decision),
-        schedulePaid: (booking, sessionId) => calendar.schedulePaid(booking, sessionId),
+        schedulePaid: (booking, sessionId, now) => calendar.schedulePaid(booking, sessionId, now),
       },
     };
   }

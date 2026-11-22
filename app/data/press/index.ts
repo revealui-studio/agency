@@ -1,4 +1,4 @@
-import type { PressItem } from './types';
+import type { PressItem } from './types.ts';
 
 export type { PressItem };
 

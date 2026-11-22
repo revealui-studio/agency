@@ -1,5 +1,5 @@
 import '@testing-library/jest-dom/vitest';
-import { cleanup, render } from '@testing-library/react';
+import { cleanup, render, waitFor } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { SentryTracker } from '@/components/SentryTracker';
 import { COOKIE_NAME, DENIED, writeConsent } from '@/lib/cookie-consent';
@@ -18,10 +18,10 @@ afterEach(() => {
 });
 
 describe('SentryTracker', () => {
-  it('initialises Sentry on mount (parent already gated on consent)', () => {
+  it('initialises Sentry on mount (parent already gated on consent)', async () => {
     writeConsent({ ...DENIED, analytics: true });
     const { rerender } = render(<SentryTracker />);
     rerender(<SentryTracker />);
-    expect(initSentry).toHaveBeenCalledTimes(1);
+    await waitFor(() => expect(initSentry).toHaveBeenCalledTimes(1));
   });
 });

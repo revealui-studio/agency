@@ -1,14 +1,13 @@
 /**
  * @vitest-environment node
  */
-import { generateKeyPairSync } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
 import type { Booking } from '../../app/lib/consultation-booking';
 import { buildOwnerPaidNotice } from '../../app/lib/consultation-owner';
+import { createMemoryCalendar } from '../consultation-calendar';
 import { deliverOwnerPaidNotice, ownerPaidRfc822 } from '../consultation-owner-mail';
 
 const TOKEN_URL = 'https://oauth2.googleapis.com/token';
-const SEND_URL = 'https://gmail.googleapis.com/gmail/v1/users/me/messages/send';
 const DRAFT_URL = 'https://gmail.googleapis.com/gmail/v1/users/me/drafts';
 
 const booking: Booking = {
@@ -53,77 +52,68 @@ describe('owner paid mail', () => {
     expect(notice.text.replaceAll('Google Meet', '')).not.toMatch(/Meet/);
   });
 
-  it('stores a Gmail draft when send is denied', async () => {
-    const notice = buildOwnerPaidNotice(booking, 59_700);
-    const calls: string[] = [];
+  it('retries the persisted draft after failure and never duplicates a successful send', async () => {
+    const calendar = createMemoryCalendar([booking]);
+    let sends = 0;
+    let drafts = 0;
+    let sent = false;
     const fetchImpl: typeof fetch = async (input, init) => {
       const url = String(input);
-      calls.push(url);
-      if (url === TOKEN_URL) {
-        return new Response(JSON.stringify({ access_token: 'tok', expires_in: 3600 }), {
-          status: 200,
-        });
-      }
-      if (url === SEND_URL) return new Response('denied', { status: 403 });
+      if (url === TOKEN_URL) return Response.json({ access_token: 'tok', expires_in: 3600 });
+      if (url.includes('/messages?'))
+        return Response.json({ messages: sent ? [{ id: 'msg_1' }] : [] });
       if (url === DRAFT_URL) {
-        const message = decodeRaw(String(init?.body ?? ''));
-        expect(message).toContain('To: founder@revealui.com');
-        expect(message).toContain('Booking: book_owner');
-        expect(message).not.toContain('To: ada@example.com');
-        return new Response(JSON.stringify({ id: 'draft_1' }), { status: 200 });
+        drafts += 1;
+        expect(decodeRaw(String(init?.body))).toContain('To: founder@revealui.com');
+        return Response.json({ id: 'draft_1' });
       }
-      return new Response('no', { status: 404 });
+      if (url.endsWith('/drafts/send')) {
+        sends += 1;
+        expect(JSON.parse(String(init?.body))).toEqual({ id: 'draft_1' });
+        if (sends === 1) return new Response('temporary', { status: 503 });
+        sent = true;
+        return Response.json({ id: 'msg_1' });
+      }
+      return new Response('missing', { status: 404 });
     };
-    const delivery = await deliverOwnerPaidNotice(
-      {
-        oauthClientId: 'owner-oauth',
-        oauthClientSecret: 'owner-secret',
-        oauthRefreshToken: 'owner-refresh',
-      },
-      notice,
-      fetchImpl,
-    );
-    expect(delivery).toBe('draft');
-    expect(calls).toContain(SEND_URL);
-    expect(calls).toContain(DRAFT_URL);
+    const env = {
+      oauthClientId: 'notice-retry',
+      oauthClientSecret: 'secret',
+      oauthRefreshToken: 'refresh',
+    };
+    const notice = buildOwnerPaidNotice(booking, 59_700);
+    await expect(deliverOwnerPaidNotice(env, notice, calendar, fetchImpl)).rejects.toThrow();
+    expect((await calendar.get(booking.booking_id))?.owner_notice).toEqual({ draftId: 'draft_1' });
+    expect(await deliverOwnerPaidNotice(env, notice, calendar, fetchImpl)).toBe('msg_1');
+    expect(await deliverOwnerPaidNotice(env, notice, calendar, fetchImpl)).toBe('msg_1');
+    expect({ sends, drafts }).toEqual({ sends: 2, drafts: 1 });
   });
 
-  it('requests gmail.send on the service-account assertion', async () => {
-    const credential = generateKeyPairSync('rsa', {
-      modulusLength: 2048,
-      privateKeyEncoding: { type: 'pkcs8', format: 'pem' },
-      publicKeyEncoding: { type: 'spki', format: 'pem' },
-    }).privateKey;
-    let assertion = '';
-    const fetchImpl: typeof fetch = async (input, init) => {
+  it('recovers provider evidence when sending succeeded before the connection failed', async () => {
+    const calendar = createMemoryCalendar([booking]);
+    let sent = false;
+    let sends = 0;
+    const fetchImpl: typeof fetch = async (input) => {
       const url = String(input);
-      if (url === TOKEN_URL) {
-        const params = new URLSearchParams(String(init?.body ?? ''));
-        assertion = params.get('assertion') ?? '';
-        return new Response(JSON.stringify({ access_token: 'tok-sa', expires_in: 3600 }), {
-          status: 200,
-        });
+      if (url === TOKEN_URL) return Response.json({ access_token: 'tok', expires_in: 3600 });
+      if (url.includes('/messages?'))
+        return Response.json({ messages: sent ? [{ id: 'msg_recovered' }] : [] });
+      if (url === DRAFT_URL) return Response.json({ id: 'draft_1' });
+      if (url.endsWith('/drafts/send')) {
+        sends += 1;
+        sent = true;
+        throw new Error('connection-lost');
       }
-      if (url === SEND_URL) return new Response(JSON.stringify({ id: 'msg_sa' }), { status: 200 });
-      return new Response('no', { status: 404 });
+      return new Response('missing', { status: 404 });
     };
-    const delivery = await deliverOwnerPaidNotice(
-      {
-        googleClientEmail: 'sa@example.com',
-        googleCredential: credential,
-        googleImpersonateSubject: 'founder@revealui.com',
-      },
-      buildOwnerPaidNotice(booking, 30_000),
-      fetchImpl,
-    );
-    expect(delivery).toBe('sent');
-    const part = assertion.split('.')[1] ?? '';
-    const padded = part.replaceAll('-', '+').replaceAll('_', '/');
-    const claims = JSON.parse(Buffer.from(padded, 'base64').toString('utf8')) as {
-      scope?: string;
-      sub?: string;
+    const env = {
+      oauthClientId: 'notice-ambiguous',
+      oauthClientSecret: 'secret',
+      oauthRefreshToken: 'refresh',
     };
-    expect(claims.scope).toBe('https://www.googleapis.com/auth/gmail.send');
-    expect(claims.sub).toBe('founder@revealui.com');
+    const notice = buildOwnerPaidNotice(booking, 30_000);
+    expect(await deliverOwnerPaidNotice(env, notice, calendar, fetchImpl)).toBe('msg_recovered');
+    expect(await deliverOwnerPaidNotice(env, notice, calendar, fetchImpl)).toBe('msg_recovered');
+    expect(sends).toBe(1);
   });
 });

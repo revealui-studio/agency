@@ -46,12 +46,12 @@ describe('readSentryDsn / sentrySampleRates', () => {
     expect(readSentryDsn({ VITE_SENTRY_DSN: TEST_DSN })).toBe(TEST_DSN);
   });
 
-  it('enables tracing and on-error replay only with consent and production', async () => {
+  it('keeps tracing and replay disabled even with production consent', async () => {
     const { sentrySampleRates } = await loadSentry();
     expect(sentrySampleRates(true, true)).toEqual({
-      tracesSampleRate: 0.1,
+      tracesSampleRate: 0,
       replaysSessionSampleRate: 0,
-      replaysOnErrorSampleRate: 1,
+      replaysOnErrorSampleRate: 0,
     });
     expect(sentrySampleRates(true, false)).toEqual({
       tracesSampleRate: 0,
@@ -93,18 +93,15 @@ describe('initSentry', () => {
       expect.objectContaining({
         dsn: TEST_DSN,
         environment: 'production',
-        tracesSampleRate: 0.1,
+        tracesSampleRate: 0,
         replaysSessionSampleRate: 0,
-        replaysOnErrorSampleRate: 1,
+        replaysOnErrorSampleRate: 0,
       }),
     );
     const options = init.mock.calls[0]?.[0] as { integrations: unknown[] };
-    expect(options.integrations).toHaveLength(2);
-    expect(browserTracingIntegration).toHaveBeenCalled();
-    expect(replayIntegration).toHaveBeenCalledWith({
-      maskAllText: true,
-      blockAllMedia: true,
-    });
+    expect(options.integrations).toHaveLength(0);
+    expect(browserTracingIntegration).not.toHaveBeenCalled();
+    expect(replayIntegration).not.toHaveBeenCalled();
   });
 
   it('initializes with DSN + consent in development but keeps tracing and replay at 0', async () => {
@@ -154,10 +151,7 @@ describe('initSentry', () => {
       },
     });
     expect(sent?.request?.cookies).toBeUndefined();
-    expect(sent?.request?.headers).toEqual({
-      Authorization: '[REDACTED]',
-      Accept: 'text/html',
-    });
+    expect(sent?.request?.headers).toBeUndefined();
   });
 });
 
@@ -170,12 +164,41 @@ describe('captureRenderError', () => {
     expect(captureException).not.toHaveBeenCalled();
   });
 
-  it('forwards the exception when a DSN is set and the client exists', async () => {
+  it('forwards the exception when consent, a DSN and the client exist', async () => {
+    writeConsent({ ...DENIED, analytics: true });
     vi.stubEnv('VITE_SENTRY_DSN', TEST_DSN);
     getClient.mockReturnValue({ getOptions: () => ({}) });
     const { captureRenderError } = await loadSentry();
     const error = new Error('boom');
     captureRenderError(error, { componentStack: 'at Foo' });
     expect(captureException).toHaveBeenCalledWith(error);
+  });
+});
+
+describe('send-time privacy', () => {
+  it('redacts network capabilities and drops queued events after withdrawal', async () => {
+    writeConsent({ ...DENIED, analytics: true });
+    const { initSentry } = await loadSentry();
+    initSentry({ VITE_SENTRY_DSN: TEST_DSN, PROD: true });
+    const options = init.mock.calls[0]?.[0];
+    const event = options.beforeSend({
+      request: {
+        url: 'https://example.com/api/consultation/network-status?nw=private#secret',
+        data: 'buyer-data',
+        headers: { cookie: 'private' },
+      },
+      breadcrumbs: [
+        {
+          category: 'fetch',
+          data: { url: '/api/consultation/booking?session_id=private', body: 'private' },
+        },
+      ],
+      extra: { token: 'private' },
+    });
+    expect(JSON.stringify(event)).not.toContain('private');
+    expect(event.request.url).toBe('https://example.com/api/consultation/network-status');
+    writeConsent(DENIED);
+    expect(options.beforeSend(event)).toBeNull();
+    expect(options.beforeBreadcrumb({ category: 'fetch', data: { url: '/safe' } })).toBeNull();
   });
 });

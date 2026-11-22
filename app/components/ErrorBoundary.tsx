@@ -1,6 +1,6 @@
 import { LinkButton } from '@revealui/presentation';
 import { Component, type ErrorInfo, type ReactNode } from 'react';
-import { captureRenderError } from '@/lib/sentry';
+import { analyticsAllowed } from '@/lib/telemetry-privacy';
 
 interface Props {
   children: ReactNode;
@@ -22,7 +22,13 @@ export class ErrorBoundary extends Component<Props, State> {
   override componentDidCatch(error: Error, info: ErrorInfo): void {
     // Forward to Sentry if the SDK was initialised. No-op when VITE_SENTRY_DSN
     // is absent or analytics consent has not been granted.
-    captureRenderError(error, { componentStack: info.componentStack ?? null });
+    if (analyticsAllowed()) {
+      async function report() {
+        const { captureRenderError } = await import('@/lib/sentry');
+        captureRenderError(error, { componentStack: info.componentStack ?? null });
+      }
+      void report();
+    }
   }
 
   override render(): ReactNode {

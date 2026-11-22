@@ -20,7 +20,7 @@ import {
   createConsultationThrottle,
 } from '../consultation-rate-limit';
 import { type StripePort, stripeFromEnv, stripeSignatureHeader } from '../consultation-stripe';
-import { createMemoryNetworkLedger } from '../network-redeem';
+import { createMemoryNetworkLedger, networkRedeemEventId } from '../network-redeem';
 
 const SECRET = 'whsec_test_consultation';
 const NOW = new Date('2026-01-06T15:00:00.000Z');
@@ -60,6 +60,7 @@ function harness(
   let desk: string | null = null;
   let nextId = 1;
   const wrapped: CalendarPort = {
+    updateBooking: calendar.updateBooking,
     expireHolds: (now) => calendar.expireHolds(now),
     busy: (from, to, now) => calendar.busy(from, to, now),
     putHold: (booking, now) => calendar.putHold(booking, now),
@@ -69,9 +70,9 @@ function harness(
       calendar.recordRefund(bookingId, stripeSessionId, evidence),
     resolveDomainPackRefund: (bookingId, chargeId, amountRefunded, decision) =>
       calendar.resolveDomainPackRefund(bookingId, chargeId, amountRefunded, decision),
-    schedulePaid: async (booking, sessionId) => {
+    schedulePaid: async (booking, sessionId, now) => {
       schedules += 1;
-      const result = await calendar.schedulePaid(booking, sessionId);
+      const result = await calendar.schedulePaid(booking, sessionId, now);
       desk = result.desk;
       return result;
     },
@@ -108,6 +109,7 @@ function harness(
     },
     onOwnerPaid: (notice) => {
       owners.push(notice);
+      return `msg_${notice.bookingId}`;
     },
     throttle: createConsultationThrottle(consultationRateConfigFromEnv({})),
     networkLedger,
@@ -333,7 +335,7 @@ describe('consultation http', () => {
     expect(params.get('metadata[stage_b]')).toBe('true');
     expect(params.get('metadata[stage_b_fee]')).toBe('waived_network');
     expect(params.get('metadata[network_jti]')).toBe('jti-http');
-    const held = await calendar.get('book_1');
+    const held = await calendar.get(`network-${await networkRedeemEventId('jti-http')}`);
     expect(held?.stage_b).toBe(true);
     expect(held?.stage_b_fee).toBe('waived_network');
     expect(held?.network_jti).toBe('jti-http');
@@ -537,59 +539,35 @@ describe('consultation http', () => {
       deps,
     );
     expect(second.status).toBe(200);
-    expect(schedules()).toBe(1);
+    expect(schedules()).toBe(2);
     expect((await calendar.get(saved.booking_id))?.meet_link).toBe(paid?.meet_link);
     expect(emails).toHaveLength(1);
     expect(owners).toHaveLength(1);
   });
 
-  it('does not recreate an expired paid hold over a replacement booking', async () => {
-    const { deps, calendar, emails } = harness();
+  it('keeps the slot protected past expiry and accepts a delayed paid event', async () => {
+    const { deps, calendar } = harness();
     const first = await handleConsultationRequest(request('/api/consultation/book', buyer()), deps);
-    const { booking_id: oldId } = (await first.json()) as { booking_id: string };
-    const later = new Date(NOW.getTime() + 21 * 60_000);
+    const { booking_id: id } = await first.json();
+    const later = new Date(NOW.getTime() + 60 * 60_000);
     const laterDeps = { ...deps, now: () => later };
     await calendar.expireHolds(later);
     const second = await handleConsultationRequest(
       request('/api/consultation/book', buyer()),
       laterDeps,
     );
-    expect(second.status).toBe(200);
-    const { booking_id: newId } = (await second.json()) as { booking_id: string };
-    async function pay(id: string) {
-      const raw = JSON.stringify({
-        type: 'checkout.session.completed',
-        data: {
-          object: {
-            id: `session-${id}`,
-            payment_status: 'paid',
-            metadata: {
-              booking_id: id,
-              ...SLOT,
-              hours: '1',
-              buyer_name: 'Ada',
-              buyer_email: 'ada@example.com',
-            },
-          },
-        },
-      });
-      const signature = await stripeSignatureHeader(
-        SECRET,
-        raw,
-        Math.floor(later.getTime() / 1000),
-      );
-      return handleConsultationRequest(
-        request('/api/stripe/webhook', raw, { 'stripe-signature': signature }),
-        laterDeps,
-      );
-    }
-    expect((await pay(newId)).status).toBe(200);
-    const latePayment = await pay(oldId);
-    expect(latePayment.status).toBe(409);
-    expect(await latePayment.json()).toEqual({ error: 'booking-expired' });
-    expect(await calendar.get(oldId)).toBeNull();
-    expect((await calendar.get(newId))?.status).toBe('paid_scheduled');
-    expect(emails).toHaveLength(1);
+    expect(second.status).toBe(409);
+    const raw = JSON.stringify({
+      type: 'checkout.session.completed',
+      data: { object: { id: 'cs_test_1', payment_status: 'paid', metadata: { booking_id: id } } },
+    });
+    const signature = await stripeSignatureHeader(SECRET, raw, Math.floor(later.getTime() / 1000));
+    const paid = await handleConsultationRequest(
+      request('/api/stripe/webhook', raw, { 'stripe-signature': signature }),
+      laterDeps,
+    );
+    expect(paid.status).toBe(200);
+    expect((await calendar.get(id))?.status).toBe('paid_scheduled');
   });
 
   it('rejects a bad signature and ignores an unpaid session', async () => {
@@ -637,7 +615,9 @@ describe('consultation http', () => {
           headers: { 'content-type': 'application/json' },
         });
       }
-      if (url.endsWith('/messages/send')) {
+      if (url.includes('/messages?')) return Response.json({ messages: [] });
+      if (url.endsWith('/drafts')) return Response.json({ id: 'draft_owner' });
+      if (url.endsWith('/drafts/send')) {
         return new Response(JSON.stringify({ id: 'msg_owner' }), {
           status: 200,
           headers: { 'content-type': 'application/json' },
@@ -673,10 +653,11 @@ describe('consultation http', () => {
     );
     expect(response.status).toBe(200);
     expect((await calendar.get(saved.booking_id))?.status).toBe('paid_scheduled');
-    const send = calls.find((call) => call.url.endsWith('/messages/send'));
-    expect(send?.url).toBe('https://gmail.googleapis.com/gmail/v1/users/me/messages/send');
-    const payload = JSON.parse(send?.body ?? '{}') as { raw?: string };
-    const padded = (payload.raw ?? '').replaceAll('-', '+').replaceAll('_', '/');
+    const send = calls.find((call) => call.url.endsWith('/drafts'));
+    expect(calls.some((call) => call.url.endsWith('/drafts/send'))).toBe(true);
+    expect(send?.url).toBe('https://gmail.googleapis.com/gmail/v1/users/me/drafts');
+    const payload = JSON.parse(send?.body ?? '{}') as { message?: { raw?: string } };
+    const padded = (payload.message?.raw ?? '').replaceAll('-', '+').replaceAll('_', '/');
     const message = Buffer.from(padded, 'base64').toString('utf8');
     expect(message).toContain('To: founder@revealui.com');
     expect(message).not.toContain('To: ada@example.com');
@@ -711,15 +692,16 @@ describe('consultation http', () => {
     );
     expect(first.status).toBe(200);
     const saved = (await first.json()) as { booking_id: string; checkout_url: string };
-    expect(saved.booking_id).toBe('book_1');
+    expect(saved.booking_id).toBe(`network-${await networkRedeemEventId('jti-first')}`);
     expect(saved.checkout_url).toBe('https://checkout.stripe.com/c/pay/cs_test_1');
     expect(checkouts).toHaveLength(1);
     const claim = await networkLedger.get('jti-first');
     expect(claim?.status).toBe('open');
     expect(claim?.email).toBe('ada@example.com');
     expect(claim?.stripeSessionId).toBe('cs_test_1');
-    expect(claim?.bookingId).toBe('book_1');
+    expect(claim?.bookingId).toBe(saved.booking_id);
     expect(claim?.expiresAt).toBe(new Date(NOW.getTime() + 72 * 60 * 60 * 1000).toISOString());
+    expect(claim?.sessionExpiresAt).toBe(new Date(NOW.getTime() + 40 * 60 * 1000).toISOString());
 
     const again = await handleConsultationRequest(
       request('/api/consultation/book', buyer({ network_token: token })),
@@ -727,9 +709,15 @@ describe('consultation http', () => {
     );
     expect(again.status).toBe(200);
     expect(await again.json()).toEqual({
-      booking_id: 'book_1',
+      booking_id: saved.booking_id,
       checkout_url: 'https://checkout.stripe.com/c/pay/cs_test_1',
     });
+    expect(checkouts).toHaveLength(1);
+    const expired = await handleConsultationRequest(
+      request('/api/consultation/book', buyer({ network_token: token })),
+      { ...deps, now: () => new Date(NOW.getTime() + 41 * 60 * 1000) },
+    );
+    expect(expired.status).toBe(409);
     expect(checkouts).toHaveLength(1);
   });
 
@@ -829,7 +817,10 @@ describe('consultation http', () => {
     expect(failed.status).toBe(502);
     expect(await failed.json()).toEqual({ error: 'checkout' });
     expect(await networkLedger.get('jti-retry')).toBeNull();
-    expect(await calendar.get('book_1')).toBeNull();
+    expect(
+      (await calendar.get(`network-${await networkRedeemEventId('jti-retry')}`))
+        ?.checkout_started_at,
+    ).toBe(NOW.toISOString());
 
     fail = false;
     const retried = await handleConsultationRequest(
